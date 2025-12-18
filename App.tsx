@@ -13,7 +13,7 @@ import Resources from './components/Resources';
 import SignIn from './components/SignIn';
 import { 
   Transaction, Contact, Campaign, BankTransaction, 
-  TransactionType, Category, AIChatMessage, 
+  TransactionType, Category, AIChatMessage, StatusOption,
   ZohoConfig, HistoryAction, AppStateSnapshot, LeadStatus, ResourceFile, Entity, ParsedRateItem
 } from './types';
 import { INITIAL_TRANSACTIONS, INITIAL_CONTACTS, RATE_CARD_SERVICES } from './constants';
@@ -297,9 +297,27 @@ const App: React.FC = () => {
         const findIdx = (keywords: string[]) => headers.findIndex(h => h && keywords.some(k => h.includes(k)));
         
         const idx = {
-          year: findIdx(['year']), project: findIdx(['project', 'campaign', 'name', 'item', 'description']),
-          client: findIdx(['client', 'customer', 'brand']), invNo: findIdx(['invoice #', 'inv #', 'invoice number', 'ref']),
-          amount: findIdx(['invoice amt', 'invoice amount', 'amount', 'total', 'price', 'value']), date: findIdx(['date', 'payment date', 'created'])
+          year: findIdx(['year']), 
+          project: findIdx(['project', 'campaign', 'name', 'item', 'description']),
+          client: findIdx(['client', 'customer', 'brand']), 
+          invNo: findIdx(['invoice #', 'inv #', 'invoice number', 'ref']),
+          amount: findIdx(['invoice amt', 'invoice amount', 'amount', 'total', 'price', 'value']), 
+          date: findIdx(['date', 'payment date', 'created']),
+          clientStatus: findIdx(['client status', 'status', 'payment status']),
+          ladlyStatus: findIdx(['ladly status', 'ladly', 'internal status', 'lm status'])
+        };
+
+        const mapToStatusOption = (val: any): StatusOption => {
+          if (!val) return 'Pending';
+          const s = val.toString().trim().toLowerCase();
+          if (s.includes('paid to personal')) return 'Paid to personal account';
+          if (s.includes('paid')) return 'Paid';
+          if (s.includes('unpaid')) return 'Unpaid';
+          if (s.includes('pending')) return 'Pending';
+          if (s.includes('overdue')) return 'Overdue';
+          if (s.includes('void')) return 'Void';
+          if (s.includes('draft')) return 'Draft';
+          return 'Pending';
         };
 
         const newTransactions: Transaction[] = rows
@@ -330,8 +348,8 @@ const App: React.FC = () => {
               customerName: (idx.client !== -1 ? row[idx.client] : '')?.toString() || '', 
               description: '',
               invoiceNumber: (idx.invNo !== -1 ? row[idx.invNo] : '')?.toString() || '', 
-              clientStatus: 'Pending', 
-              ladlyStatus: 'Pending',
+              clientStatus: mapToStatusOption(idx.clientStatus !== -1 ? row[idx.clientStatus] : 'Pending'), 
+              ladlyStatus: mapToStatusOption(idx.ladlyStatus !== -1 ? row[idx.ladlyStatus] : 'Pending'),
               amount: amount, 
               vat: Number((amount - net).toFixed(2)), 
               net: Number(net.toFixed(2)), 
