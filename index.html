@@ -1,0 +1,118 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BooKeeper</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              primary: 'var(--primary)',
+              'primary-foreground': 'var(--primary-foreground)',
+              'bg-page': 'var(--bg-page)',
+              'bg-card': 'var(--bg-card)',
+              'sidebar': 'var(--sidebar)',
+            },
+            animation: {
+              'spin-slow': 'spin 12s linear infinite',
+              'reverse-spin-slow': 'reverse-spin 12s linear infinite',
+              'pulse-soft': 'pulse-soft 3s ease-in-out infinite',
+              'float': 'float 4s ease-in-out infinite',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      :root {
+        --primary: #0d9488;
+        --primary-foreground: #ffffff;
+        --bg-page: #F9F7F2;
+        --bg-card: #ffffff;
+        --sidebar: #134e4a;
+        --root-font-size: 14px;
+      }
+
+      html {
+        font-size: var(--root-font-size);
+      }
+
+      .theme-slate { --primary: #0f172a; --sidebar: #0f172a; }
+      .theme-indigo { --primary: #4f46e5; --sidebar: #1e1b4b; }
+      .theme-teal { --primary: #0d9488; --sidebar: #134e4a; }
+      .theme-rose { --primary: #e11d48; --sidebar: #4c0519; }
+      .theme-amber { --primary: #d97706; --sidebar: #451a03; }
+      .theme-high-contrast { --primary: #000000; --sidebar: #000000; --bg-page: #ffffff; }
+
+      .dark {
+        --bg-page: #0f172a;
+        --bg-card: #1e293b;
+        --primary-foreground: #f8fafc;
+      }
+
+      .dark.theme-high-contrast {
+        --bg-page: #000000;
+        --bg-card: #111111;
+        --primary: #ffffff;
+        --primary-foreground: #000000;
+      }
+
+      /* Custom scrollbar */
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      .dark ::-webkit-scrollbar-thumb { background: #475569; }
+
+      @keyframes reverse-spin {
+        from { transform: rotate(360deg); }
+        to { transform: rotate(0deg); }
+      }
+
+      @keyframes orbit {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+
+      @keyframes pulse-soft {
+        0%, 100% { transform: scale(1); opacity: 0.8; }
+        50% { transform: scale(1.1); opacity: 1; }
+      }
+
+      @keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-5px); }
+      }
+
+      /* Orbit logic for currency icons */
+      .orbit-container {
+        animation: orbit 15s linear infinite;
+      }
+      .orbit-item {
+        animation: reverse-spin 15s linear infinite;
+      }
+    </style>
+    <script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.561.0",
+    "recharts": "https://esm.sh/recharts@^3.6.0",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "xlsx": "https://esm.sh/xlsx@0.18.5",
+    "jspdf": "https://esm.sh/jspdf@2.5.1",
+    "html2canvas": "https://esm.sh/html2canvas@1.4.1"
+  }
+}
+</script>
+  </head>
+  <body class="bg-bg-page text-slate-900 dark:text-slate-100 font-sans antialiased transition-colors duration-300">
+    <div id="root"></div>
+  </body>
+</html>
