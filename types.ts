@@ -183,7 +183,7 @@ export interface Entity {
   name: string;
   initials: string;
   color: string;
-  logo?: string; // Base64 string for the custom logo/profile pic
+  logo?: string; 
 }
 
 export interface AppStateSnapshot {
@@ -222,4 +222,26 @@ export interface QuotationResponse {
   items: Deliverable[];
   total: number;
   notes: string;
+}
+
+/** 
+ * Zoho Specific Response Shapes 
+ */
+export interface ZohoContactResponse {
+  contact_id: string;
+  contact_name: string;
+  company_name?: string;
+  email?: string;
+  phone?: string;
+  mobile?: string;
+}
+
+export interface ZohoInvoiceResponse {
+  invoice_id: string;
+  invoice_number: string;
+  date: string;
+  total: number;
+  currency_code: string;
+  customer_name: string;
+  status: 'paid' | 'overdue' | 'draft' | 'void' | 'unpaid' | string;
 }

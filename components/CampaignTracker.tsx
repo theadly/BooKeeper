@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { Campaign, Transaction, CampaignFile, Deliverable, ParsedRateItem } from '../types';
 import { formatCurrency, formatDate, RATE_CARD_SERVICES } from '../constants';
@@ -91,13 +90,13 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
     const totalPaid = projectTransactions.reduce((sum, t) => sum + (t.clientPayment || 0), 0);
     const totalVat = projectTransactions.reduce((sum, t) => sum + (t.vat || 0), 0);
     
-    // Explicitly casting deliverables and ensuring it's an array to resolve 'unknown' type issues.
-    const campaignDeliverables = (metadata?.deliverables as Deliverable[]) || [];
+    // Fix: Explicitly casting deliverables and ensuring it's an array to resolve 'unknown' type issues.
+    const campaignDeliverables: Deliverable[] = (metadata?.deliverables as any as Deliverable[]) || [];
     const deliverablesValue = campaignDeliverables.reduce((sum, d: Deliverable) => sum + (d.rate * d.quantity), 0);
     
     const completedCount = campaignDeliverables.filter((d: Deliverable) => !!d.isCompleted).length;
     // Fix: Using explicit cast to ensure campaignDeliverables is not unknown.
-    const totalCount = campaignDeliverables.length;
+    const totalCount = (campaignDeliverables as Deliverable[]).length;
     const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
 
     const groupedLines: Record<string, Transaction[]> = {};
@@ -370,11 +369,11 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
             
             <div className="p-6 space-y-4">
               {(() => {
-                 // Explicitly casting deliverables and ensuring it's an array to resolve 'unknown' type issues.
-                 const deliverables = (metadata?.deliverables as Deliverable[]) || [];
+                 // Fix: Explicitly casting deliverables and ensuring it's an array to resolve 'unknown' type issues.
+                 const deliverables: Deliverable[] = (metadata?.deliverables as any as Deliverable[]) || [];
                  if (deliverables.length > 0) {
-                   // Fix: Explicitly ensuring deliverables is an array before calling map to avoid 'unknown' type issues.
-                   return (deliverables as Deliverable[]).map((item: Deliverable) => (
+                   // Fix: Using typed array to avoid 'unknown' mapping errors.
+                   return (deliverables).map((item: Deliverable) => (
                      <div key={item.id} className={`flex flex-col gap-5 p-6 rounded-[1.8rem] border transition-all duration-300 bg-white border-slate-100 hover:shadow-md relative`}>
                        <div className="flex items-center justify-between gap-4">
                          <div className="flex items-center gap-4 flex-1 min-w-0">
@@ -683,11 +682,11 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
                       <div className="flex wrap gap-1 mb-2.5">
                         <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100">{lines.length} Line{lines.length !== 1 ? 's' : ''}</span>
                         {(() => {
-                          // Explicitly casting deliverables and ensuring it's an array to resolve 'unknown' type issues in the folder view.
-                          const deliverables = (campaign.deliverables as Deliverable[]) || [];
+                          // Fix: Explicitly casting deliverables and ensuring it's an array to resolve 'unknown' type issues in the folder view.
+                          const deliverables: Deliverable[] = (campaign.deliverables as any as Deliverable[]) || [];
                           if (deliverables.length > 0) {
                             return (
-                              <span className="text-[7px] font-black text-primary uppercase tracking-widest bg-primary/5 px-1.5 py-0.5 rounded border border-primary/10">{(deliverables as Deliverable[]).length} Deliverables</span>
+                              <span className="text-[7px] font-black text-primary uppercase tracking-widest bg-primary/5 px-1.5 py-0.5 rounded border border-primary/10">{(deliverables).length} Deliverables</span>
                             );
                           }
                           return null;

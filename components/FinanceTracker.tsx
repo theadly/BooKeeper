@@ -136,7 +136,9 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
 
     if (sortConfig.key && sortConfig.direction) {
       list.sort((a, b) => {
-        let valA: any, valB: any;
+        let valA: number | string = 0;
+        let valB: number | string = 0;
+        
         switch (sortConfig.key) {
           case 'year': valA = a.year; valB = b.year; break;
           case 'project': valA = a.project.toLowerCase(); valB = b.project.toLowerCase(); break;
@@ -150,8 +152,8 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
           case 'fee': valA = a.fee || 0; valB = b.fee || 0; break;
           case 'payable': valA = a.payable || 0; valB = b.payable || 0; break;
           case 'paid': valA = a.clientPayment || 0; valB = b.clientPayment || 0; break;
-          default: valA = 0; valB = 0;
         }
+
         if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
         if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
         return 0;

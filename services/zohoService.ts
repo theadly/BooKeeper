@@ -1,4 +1,5 @@
-import { Contact, Transaction, TransactionType, Category, LeadStatus, ZohoConfig, StatusOption } from '../types';
+
+import { Contact, Transaction, TransactionType, Category, LeadStatus, ZohoConfig, StatusOption, ZohoContactResponse, ZohoInvoiceResponse } from '../types';
 
 export const fetchZohoContacts = async (config: ZohoConfig): Promise<Contact[]> => {
   if (!config.accessToken) return [];
@@ -16,10 +17,10 @@ export const fetchZohoContacts = async (config: ZohoConfig): Promise<Contact[]> 
         throw new Error(`Zoho API Error: ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { code: number; message: string; contacts: ZohoContactResponse[] };
     if (data.code !== 0) throw new Error(data.message);
 
-    return data.contacts.map((c: any) => ({
+    return (data.contacts || []).map((c: ZohoContactResponse) => ({
       id: `zoho-${c.contact_id}`,
       name: c.contact_name,
       company: c.company_name || '',
@@ -54,31 +55,32 @@ export const fetchZohoInvoices = async (config: ZohoConfig): Promise<Transaction
           throw new Error(`Zoho API Error: ${response.statusText}`);
       }
   
-      const data = await response.json();
+      const data = await response.json() as { code: number; message: string; invoices: ZohoInvoiceResponse[] };
       if (data.code !== 0) throw new Error(data.message);
   
-      return data.invoices.map((inv: any) => {
+      return (data.invoices || []).map((inv: ZohoInvoiceResponse) => {
         // Map Zoho status to our internal StatusOption
         let status: StatusOption = 'Pending';
-        if (inv.status === 'paid') status = 'Paid';
-        else if (inv.status === 'overdue') status = 'Overdue';
-        else if (inv.status === 'draft') status = 'Draft';
-        else if (inv.status === 'void') status = 'Void';
-        else if (inv.status === 'unpaid') status = 'Unpaid';
+        const zStatus = String(inv.status).toLowerCase();
+        if (zStatus === 'paid') status = 'Paid';
+        else if (zStatus === 'overdue') status = 'Overdue';
+        else if (zStatus === 'draft') status = 'Draft';
+        else if (zStatus === 'void') status = 'Void';
+        else if (zStatus === 'unpaid') status = 'Unpaid';
 
         return {
             id: `zoho-inv-${inv.invoice_id}`,
-            year: new Date(inv.date).getFullYear(),
+            year: new Date(inv.date).getFullYear() || new Date().getFullYear(),
             date: inv.date,
-            project: `Invoice #${inv.invoice_number}`, // Zoho might not have project field easily accessible without more calls
+            project: `Invoice #${inv.invoice_number}`,
             description: `Zoho Import - ${inv.customer_name}`,
-            amount: inv.total,
+            amount: Number(inv.total) || 0,
             category: Category.BUSINESS,
             type: TransactionType.INCOME,
             currency: inv.currency_code === 'USD' ? 'USD' : 'AED',
             invoiceNumber: inv.invoice_number,
             clientStatus: status,
-            ladlyStatus: status, // Default to same status
+            ladlyStatus: status, 
             customerName: inv.customer_name,
             zohoInvoiceId: inv.invoice_id
         };

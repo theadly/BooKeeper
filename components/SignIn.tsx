@@ -1,14 +1,16 @@
 
 import React, { useState } from 'react';
-import { Lock, Mail, ArrowRight } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Sun, Moon } from 'lucide-react';
 import AppLogo from './AppLogo';
 import LadlyLogo from './LadlyLogo';
 
 interface SignInProps {
   onSignIn: () => void;
+  isDarkMode: boolean;
+  onToggleDarkMode: (isDark: boolean) => void;
 }
 
-const SignIn: React.FC<SignInProps> = ({ onSignIn }) => {
+const SignIn: React.FC<SignInProps> = ({ onSignIn, isDarkMode, onToggleDarkMode }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -24,10 +26,21 @@ const SignIn: React.FC<SignInProps> = ({ onSignIn }) => {
   };
 
   return (
-    <div className="min-h-screen bg-[#F9F7F2] dark:bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">
+    <div className="min-h-screen bg-[#F9F7F2] dark:bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden transition-colors duration-500">
       {/* Aesthetic Background Accents */}
       <div className="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-3xl animate-pulse" />
       <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-500/5 rounded-full blur-3xl animate-pulse" style={{ animationDelay: '2s' }} />
+
+      {/* Theme Toggle Button */}
+      <div className="absolute top-8 right-8 z-50">
+        <button
+          onClick={() => onToggleDarkMode(!isDarkMode)}
+          className="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-primary transition-all shadow-sm active:scale-95"
+          title={isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+        >
+          {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
+        </button>
+      </div>
 
       <div className="w-full max-w-md relative z-10">
         {/* Brand Identity Section */}
@@ -55,7 +68,7 @@ const SignIn: React.FC<SignInProps> = ({ onSignIn }) => {
                   type="email" 
                   required
                   placeholder="name@company.com"
-                  className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 focus:ring-2 focus:ring-primary font-bold text-sm dark:text-white"
+                  className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 focus:ring-2 focus:ring-primary font-bold text-sm dark:text-white outline-none"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
@@ -70,7 +83,7 @@ const SignIn: React.FC<SignInProps> = ({ onSignIn }) => {
                   type="password" 
                   required
                   placeholder="••••••••"
-                  className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 focus:ring-2 focus:ring-primary font-bold text-sm dark:text-white"
+                  className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 focus:ring-2 focus:ring-primary font-bold text-sm dark:text-white outline-none"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />

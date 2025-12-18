@@ -418,7 +418,7 @@ const App: React.FC = () => {
   }, [transactions, campaignMetadata]);
 
   if (!isAuthenticated) {
-    return <SignIn onSignIn={() => setIsAuthenticated(true)} />;
+    return <SignIn onSignIn={() => setIsAuthenticated(true)} isDarkMode={isDarkMode} onToggleDarkMode={setIsDarkMode} />;
   }
 
   return (

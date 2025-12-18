@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
-import { Transaction, TransactionType } from '../types';
+import { Transaction, TransactionType, Contact, BankTransaction } from '../types';
 import { 
   TrendingUp, Clock, Briefcase, Receipt, 
   ArrowUpRight, ArrowDownRight, AlertCircle, 
@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, 
-  ResponsiveContainer, CartesianGrid, Cell 
+  ResponsiveContainer, CartesianGrid, Cell, TooltipProps
 } from 'recharts';
 import { formatCurrency, USD_TO_AED } from '../constants';
 import DirhamSymbol from './DirhamSymbol';
@@ -17,8 +17,8 @@ import LadlyLogo from './LadlyLogo';
 
 interface DashboardProps {
   transactions: Transaction[];
-  contacts?: any;
-  bankTransactions?: any;
+  contacts?: Contact[];
+  bankTransactions?: BankTransaction[];
   showAedEquivalent: boolean;
 }
 
@@ -94,14 +94,14 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, showAedEquivalent }
     .filter(t => t.type === TransactionType.INCOME)
     .reduce((acc, t) => acc + (t.vat || 0), 0);
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
+  const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
+    if (active && payload && payload.length && payload[0].value !== undefined) {
       return (
         <div className="bg-bg-card p-4 rounded-xl shadow-xl border border-slate-100 dark:border-slate-800 animate-in fade-in zoom-in duration-200">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Year {label}</p>
           <div className="flex items-center gap-2 text-primary font-black text-lg">
              <DirhamSymbol className="h-4 w-4" />
-             <span>{payload[0].value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+             <span>{Number(payload[0].value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
           </div>
         </div>
       );
