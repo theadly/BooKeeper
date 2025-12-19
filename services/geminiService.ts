@@ -1,87 +1,71 @@
 
-import { GoogleGenAI, Type, GenerateContentParameters } from "@google/genai";
+import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { Transaction, Contact, Category, Campaign, BankTransaction, Deliverable, ParsedRateItem, BankStatementResponse, QuotationResponse } from "../types";
 import { RATE_CARD_SERVICES } from "../constants";
 import { CONFIG } from "../config";
 
 const getAiClient = () => {
-  if (!CONFIG.API_KEY) return null;
-  return new GoogleGenAI({ apiKey: CONFIG.API_KEY });
+  const key = process.env.API_KEY || CONFIG.API_KEY;
+  if (!key) return null;
+  return new GoogleGenAI({ apiKey: key });
 };
 
-interface YearlyStat {
-  income: number;
-  fees: number;
-  count: number;
-}
-
-export const generateFinancialAdvice = async (
-  query: string, 
-  transactions: Transaction[], 
-  contacts: Contact[],
-  campaigns: Campaign[]
-): Promise<string> => {
-  const ai = getAiClient();
-  if (!ai) return "API Key is missing. Please check your configuration.";
-
-  const yearlySummary = transactions.reduce<Record<number, YearlyStat>>((acc, t) => {
-    const year = t.year;
-    if (!acc[year]) acc[year] = { income: 0, fees: 0, count: 0 };
-    if (t.type === 'Income') {
-      acc[year].income += t.amount;
-      acc[year].fees += (t.fee || 0);
-    }
-    acc[year].count += 1;
-    return acc;
-  }, {});
-
-  const projectsInLedger = campaigns.map(c => c.projectName);
-
-  const contextData = `
-    Global Financial Summary (All Years):
-    ${JSON.stringify(yearlySummary)}
-    
-    Current Projects/Campaigns in Ledger:
-    ${projectsInLedger.join(', ')}
-
-    Detailed Transaction Log (Sample):
-    ${JSON.stringify(transactions.slice(-15))}
-
-    CRM Pipeline:
-    - Total Contacts: ${contacts.length}
-    - Pipeline Value: $${contacts.reduce((sum, c) => sum + c.potentialValue, 0)}
-  `;
-
+/**
+ * Clean AI response to ensure valid JSON
+ */
+const cleanJsonResponse = (text: any) => {
+  if (!text || typeof text !== 'string') return null;
   try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
-      contents: `Context Data:\n${contextData}\n\nUser Query:\n${query}`,
-      config: {
-        systemInstruction: `You are Jarvis, an expert personal accountant assistant. 
-        1. Always use the Global Financial Summary for questions about total fees or revenue for past years. 
-        2. When mentioning a project found in the "Current Projects" list, wrap it as [Campaign:PROJECT_NAME].
-        3. Be concise, professional, and provide clear breakdowns.`,
-      }
-    });
-    return response.text || "I couldn't generate a response.";
-  } catch (error) {
-    console.error("Gemini financial advice error:", error);
-    return "Sorry, I encountered an error while processing your request.";
+    // Remove markdown code blocks if present
+    const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    return JSON.parse(cleaned);
+  } catch (e) {
+    console.error("JSON Clean/Parse failed:", text);
+    return null;
+  }
+};
+
+export const updateStatusTool: FunctionDeclaration = {
+  name: 'update_ledger_status',
+  parameters: {
+    type: Type.OBJECT,
+    description: 'Update the status of one or more ledger entries.',
+    properties: {
+      projectNames: { type: Type.ARRAY, items: { type: Type.STRING } },
+      field: { type: Type.STRING, enum: ['clientStatus', 'ladlyStatus'] },
+      status: { type: Type.STRING, enum: ['Paid', 'Paid to personal account', 'Pending', 'Unpaid', 'Overdue', 'Void', 'Draft'] }
+    },
+    required: ['projectNames', 'field', 'status']
+  }
+};
+
+export const reconcileTool: FunctionDeclaration = {
+  name: 'match_ledger_with_bank',
+  parameters: {
+    type: Type.OBJECT,
+    description: 'Match a specific ledger entry with a bank transaction.',
+    properties: {
+      projectName: { type: Type.STRING },
+      bankTransactionId: { type: Type.STRING }
+    },
+    required: ['projectName', 'bankTransactionId']
   }
 };
 
 export const parseBankStatement = async (base64Data: string, mimeType: string): Promise<BankTransaction[]> => {
   const ai = getAiClient();
-  if (!ai) return [];
+  if (!ai) throw new Error("AI Client not initialized");
+  
   const validCategories = Object.values(Category).join(', ');
+  const safeMime = mimeType || 'application/pdf';
 
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: {
         parts: [
-          { inlineData: { mimeType, data: base64Data } },
-          { text: `List every transaction. Assign a 'category' from: [${validCategories}]. Return JSON array.` }
+          { inlineData: { mimeType: safeMime, data: base64Data } },
+          { text: `List every transaction from this statement. Assign a 'category' from: [${validCategories}]. Output raw JSON array only.` }
         ]
       },
       config: {
@@ -98,198 +82,146 @@ export const parseBankStatement = async (base64Data: string, mimeType: string): 
               type: { type: Type.STRING, enum: ['credit', 'debit'] },
               category: { type: Type.STRING },
               vendor: { type: Type.STRING }
-            }
+            },
+            required: ['date', 'amount', 'type', 'description']
           }
         }
       }
     });
     
-    if (!response.text) return [];
-    const parsed = JSON.parse(response.text) as BankStatementResponse[];
+    const parsed = cleanJsonResponse(response.text);
+    if (!Array.isArray(parsed)) return [];
+    
     return parsed.map(item => ({
       id: crypto.randomUUID(),
       ...item
     }));
   } catch (error) {
-    console.error("Bank statement parsing error:", error);
-    return [];
+    console.error("Bank parsing error:", error);
+    throw error;
   }
 };
 
-export const parseRateCard = async (base64Data: string, mimeType: string): Promise<ParsedRateItem[]> => {
+export const generateFinancialAdvice = async (
+  query: string, 
+  transactions: Transaction[], 
+  contacts: Contact[],
+  campaigns: Campaign[],
+  bankTransactions: BankTransaction[]
+): Promise<{ text: string; functionCalls?: any[] }> => {
   const ai = getAiClient();
-  if (!ai) return [];
+  if (!ai) return { text: "API Key is missing." };
+
+  const contextData = `
+    Global Financial Summary: ${transactions.length} items.
+    Unmatched Bank Transactions: ${bankTransactions.filter(bt => !bt.matchedTransactionId).length} items.
+  `;
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: {
-        parts: [
-          { inlineData: { mimeType, data: base64Data } },
-          { text: `Read this Rate Card and extract all services and their prices. Return a clean JSON array of objects with 'name', 'rate' (number), and 'unit' (if applicable).` }
-        ]
-      },
+      model: 'gemini-3-pro-preview',
+      contents: `Context Summary: ${contextData}\n\nUser Query: ${query}`,
       config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              name: { type: Type.STRING },
-              rate: { type: Type.NUMBER },
-              unit: { type: Type.STRING }
-            },
-            required: ['name', 'rate']
-          }
-        }
+        systemInstruction: `You are JARVIS. Assist with ledger management. Use tools for updates.`,
+        tools: [{ functionDeclarations: [updateStatusTool, reconcileTool] }]
       }
     });
-    return JSON.parse(response.text || "[]") as ParsedRateItem[];
+
+    return {
+      text: response.text || "Processed.",
+      functionCalls: response.functionCalls
+    };
   } catch (error) {
-    console.error("Rate Card Parsing Error:", error);
-    return [];
-  }
-};
-
-export const generateQuote = async (
-  inputText: string, 
-  base64Doc: string | null, 
-  mimeType: string | null, 
-  rateCard: ParsedRateItem[]
-): Promise<QuotationResponse> => {
-  const ai = getAiClient();
-  const fallback: QuotationResponse = { clientName: 'Error', items: [], total: 0, notes: 'Failed to generate quote.' };
-  
-  if (!ai) return fallback;
-
-  const rateCardText = rateCard.map(r => `${r.name}: ${r.rate} ${r.unit || ''}`).join('\n');
-  const parts: any[] = [{ text: `Based on the following Rate Card:\n${rateCardText}\n\nAnd the user input/document:\n${inputText}` }];
-  
-  if (base64Doc && mimeType) {
-    parts.push({ inlineData: { data: base64Doc, mimeType } });
-  }
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
-      contents: { parts },
-      config: {
-        systemInstruction: "Create a formal quotation. Extract deliverables and match them to the rate card prices where possible. If a service is not in the rate card, estimate based on similar items. Return JSON.",
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            clientName: { type: Type.STRING },
-            items: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  id: { type: Type.STRING },
-                  name: { type: Type.STRING },
-                  rate: { type: Type.NUMBER },
-                  quantity: { type: Type.NUMBER },
-                  currency: { type: Type.STRING },
-                  platform: { type: Type.STRING }
-                },
-                required: ['id', 'name', 'rate', 'quantity', 'currency']
-              }
-            },
-            total: { type: Type.NUMBER },
-            notes: { type: Type.STRING }
-          },
-          required: ['clientName', 'items', 'total']
-        }
-      }
-    });
-    return JSON.parse(response.text || "{}") as QuotationResponse;
-  } catch (error) {
-    console.error("Quote Generation Error:", error);
-    return fallback;
+    return { text: "AI Service temporarily unavailable." };
   }
 };
 
 export const parseContractForDeliverables = async (base64Data: string, mimeType: string): Promise<Deliverable[]> => {
   const ai = getAiClient();
   if (!ai) return [];
-
-  const rateCardContext = RATE_CARD_SERVICES.map(s => `${s.name} (Rate: ${s.rate})`).join(', ');
-
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3-pro-preview',
       contents: {
         parts: [
           { inlineData: { mimeType, data: base64Data } },
-          { text: `Read this contract and extract all deliverables/services. 
-                   Try to map items to these standard services: [${rateCardContext}].
-                   CRITICAL: If a deliverable has a quantity greater than 1 (e.g., "6 Videos"), return each video as a separate individual item in the array. 
-                   For example, instead of 1 item with quantity 6, return 6 items with quantity 1.
-                   Append a suffix like "1/6", "2/6" etc. to the name of each exploded item.
-                   Assign a random ID string to each. Status should be 'Pending'.` }
+          { text: `Extract all advertising deliverables from this contract. 
+          
+          STRICT RULES:
+          1. DECOMPOSE BUNDLES: Do NOT return a single item for a "Package". If a package contains "6 TikToks and 2 Events", you MUST return TWO SEPARATE objects (one for TikToks with qty 6, one for Events with qty 2).
+          2. ATOMIC UNITS: Every object must represent a single type of task.
+          3. QUANTITIES: Look for phrases like "6x", "Total of 5", "Quantity: 3". Extract the number accurately.
+          4. UNIT RATES: If the contract shows a total price for the bundle, divide it by the quantity to get the individual unit rate.
+          5. NO GROUPING: Never use commas to list multiple different deliverable types in one "name" field.
+          
+          Example: "Campaign Package ($36,000): 6 TikToks" -> Name: "TikTok Video", Qty: 6, Rate: 6000.` }
         ]
       },
-      config: {
+      config: { 
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.ARRAY,
           items: {
             type: Type.OBJECT,
             properties: {
-              id: { type: Type.STRING },
-              name: { type: Type.STRING },
-              rate: { type: Type.NUMBER },
-              quantity: { type: Type.NUMBER },
-              currency: { type: Type.STRING },
-              status: { type: Type.STRING, enum: ['Pending', 'In Progress', 'Completed'] }
+              name: { type: Type.STRING, description: 'Atomic name of the service (e.g. TikTok Video)' },
+              rate: { type: Type.NUMBER, description: 'Individual unit rate' },
+              quantity: { type: Type.NUMBER, description: 'Total number of these items' },
+              currency: { type: Type.STRING, description: 'Currency code' },
+              platform: { type: Type.STRING, description: 'Platform name' }
             },
-            required: ['id', 'name', 'rate', 'quantity', 'currency', 'status']
+            required: ['name', 'rate', 'quantity']
           }
         }
       }
     });
-    return JSON.parse(response.text || "[]") as Deliverable[];
-  } catch (error) {
-    console.error("Contract Parsing Error:", error);
-    return [];
+    
+    let rawItems = cleanJsonResponse(response.text);
+    if (!Array.isArray(rawItems)) return [];
+
+    return rawItems.map((item: any) => ({
+      id: crypto.randomUUID(),
+      name: item.name || 'Unknown Deliverable',
+      rate: Number(item.rate) || 0,
+      quantity: Number(item.quantity) || 1,
+      currency: item.currency || 'AED',
+      platform: item.platform || 'General',
+      status: 'Pending',
+      isCompleted: false
+    }));
+  } catch (e) { 
+    console.error("Contract parsing error:", e);
+    return []; 
   }
 };
 
 export const parseCompanyDocument = async (base64Data: string, mimeType: string): Promise<Partial<Contact>> => {
   const ai = getAiClient();
   if (!ai) return {};
-
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: {
         parts: [
           { inlineData: { mimeType, data: base64Data } },
-          { text: `Extract company information from this Trade License or VAT Certificate. 
-                   Look for: Legal Company Name, Email, Phone number, and TRN (Tax Registration Number). 
-                   If any are missing, leave them empty. 
-                   Assign a potentialValue of 0. Return as JSON object.` }
+          { text: `Extract company info (Name, Email, TRN). Return JSON.` }
         ]
       },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            company: { type: Type.STRING },
-            email: { type: Type.STRING },
-            phone: { type: Type.STRING },
-            trn: { type: Type.STRING },
-            name: { type: Type.STRING, description: "Extract individual contact person name if available, otherwise use company name" },
-            notes: { type: Type.STRING, description: "Summary of license validity or business activities" }
-          }
-        }
-      }
+      config: { responseMimeType: "application/json" }
     });
-    return JSON.parse(response.text || "{}") as Partial<Contact>;
-  } catch (error) {
-    console.error("Document Parsing Error:", error);
-    return {};
-  }
+    return cleanJsonResponse(response.text) || {};
+  } catch (e) { return {}; }
+};
+
+export const generateQuote = async (inputText: string, base64Doc: string | null, mimeType: string | null, rateCard: ParsedRateItem[]): Promise<QuotationResponse> => {
+  const ai = getAiClient();
+  if (!ai) throw new Error("AI not ready");
+  const parts: any[] = [{ text: `Generate quote based on: ${inputText}` }];
+  if (base64Doc && mimeType) parts.push({ inlineData: { data: base64Doc, mimeType } });
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: { parts },
+    config: { responseMimeType: "application/json" }
+  });
+  return cleanJsonResponse(response.text) || { clientName: 'New Client', items: [], total: 0, notes: '' };
 };

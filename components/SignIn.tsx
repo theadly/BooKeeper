@@ -1,8 +1,9 @@
 
-import React, { useState } from 'react';
-import { Lock, Mail, ArrowRight, Sun, Moon } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Lock, Mail, ArrowRight, Sun, Moon, AlertCircle, Key, ShieldCheck } from 'lucide-react';
 import AppLogo from './AppLogo';
 import LadlyLogo from './LadlyLogo';
+import { CONFIG } from '../config';
 
 interface SignInProps {
   onSignIn: () => void;
@@ -14,16 +15,101 @@ const SignIn: React.FC<SignInProps> = ({ onSignIn, isDarkMode, onToggleDarkMode 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Setup flow states
+  const [showSetup, setShowSetup] = useState(false);
+  const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+
+  // Load set credentials or use defaults
+  const getCredentials = () => {
+    const saved = localStorage.getItem('app_credentials');
+    if (saved) return JSON.parse(saved);
+    return { email: CONFIG.DEFAULT_USER, password: CONFIG.DEFAULT_PASS };
+  };
+
+  const isUsingDefaults = () => {
+    return !localStorage.getItem('app_credentials');
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    // Simulate authentication delay
+    setError(null);
+
+    // Simulate network delay
     setTimeout(() => {
-      onSignIn();
-      setIsLoading(false);
-    }, 1500);
+      const creds = getCredentials();
+      if (email.toLowerCase() === creds.email.toLowerCase() && password === creds.password) {
+        // Check if it's initial login with default credentials
+        if (isUsingDefaults()) {
+          setShowSetup(true);
+          setNewEmail(creds.email);
+          setIsLoading(false);
+        } else {
+          onSignIn();
+        }
+      } else {
+        setError('Invalid email or password. Please try again.');
+        setIsLoading(false);
+      }
+    }, 800);
   };
+
+  const handleSetupSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+        setError('Password must be at least 6 characters.');
+        return;
+    }
+    setIsLoading(true);
+    
+    setTimeout(() => {
+        localStorage.setItem('app_credentials', JSON.stringify({
+            email: newEmail,
+            password: newPassword
+        }));
+        onSignIn();
+    }, 1000);
+  };
+
+  if (showSetup) {
+    return (
+        <div className="min-h-screen bg-[#F9F7F2] dark:bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden transition-colors duration-500">
+          <div className="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-3xl" />
+          <div className="w-full max-w-md relative z-10">
+            <div className="flex flex-col items-center mb-10">
+                <div className="bg-primary p-4 rounded-3xl shadow-xl mb-6"><Key className="text-white" size={32} /></div>
+                <h1 className="text-3xl font-black text-slate-900 dark:text-white tracking-tighter mb-1">Set Your Credentials</h1>
+                <p className="text-slate-400 font-bold text-xs uppercase tracking-widest text-center">Security Setup Required for first access</p>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 p-10 rounded-[3rem] shadow-2xl border border-slate-100 dark:border-slate-800">
+                <form onSubmit={handleSetupSubmit} className="space-y-6">
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Your Permanent Email</label>
+                        <div className="relative">
+                            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                            <input type="email" required className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 font-bold text-sm dark:text-white outline-none focus:ring-2 focus:ring-primary" value={newEmail} onChange={e => setNewEmail(e.target.value)} />
+                        </div>
+                    </div>
+                    <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">New Secure Password</label>
+                        <div className="relative">
+                            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                            <input type="password" required minLength={6} placeholder="Min. 6 characters" className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 font-bold text-sm dark:text-white outline-none focus:ring-2 focus:ring-primary" value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+                        </div>
+                    </div>
+                    <button type="submit" disabled={isLoading} className="w-full bg-primary text-white py-4.5 rounded-2xl font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-3">
+                        {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <>Finish & Save Account <ShieldCheck size={18}/></>}
+                    </button>
+                </form>
+            </div>
+          </div>
+        </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#F9F7F2] dark:bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden transition-colors duration-500">
@@ -58,6 +144,13 @@ const SignIn: React.FC<SignInProps> = ({ onSignIn, isDarkMode, onToggleDarkMode 
             <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-1">Welcome back</h2>
             <p className="text-slate-400 text-sm font-medium">Please enter your credentials to access the workspace.</p>
           </div>
+
+          {error && (
+            <div className="mb-6 p-4 bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800 rounded-2xl flex items-center gap-3 text-rose-600 dark:text-rose-400 animate-in fade-in slide-in-from-top-2">
+              <AlertCircle size={18} />
+              <p className="text-xs font-bold uppercase tracking-tight">{error}</p>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-1.5">
@@ -112,6 +205,14 @@ const SignIn: React.FC<SignInProps> = ({ onSignIn, isDarkMode, onToggleDarkMode 
               )}
             </button>
           </form>
+          
+          {isUsingDefaults() && (
+            <div className="mt-8 pt-6 border-t border-slate-50 dark:border-slate-800 text-center">
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                Initial login: <span className="text-slate-900 dark:text-slate-200">{CONFIG.DEFAULT_USER}</span> / <span className="text-slate-900 dark:text-slate-200">{CONFIG.DEFAULT_PASS}</span>
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Corporate Footer Byline */}

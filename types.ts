@@ -53,6 +53,7 @@ export interface Transaction {
   billNumber?: string;
   referenceNumber?: string;
   codeToLm?: string;
+  paymentToLmRef?: string;
   
   // Statuses
   clientStatus: StatusOption;
@@ -176,6 +177,7 @@ export interface ZohoConfig {
   accessToken: string;
   organizationId: string;
   apiDomain: string;
+  lastSync?: string;
 }
 
 export interface Entity {

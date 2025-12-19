@@ -14,458 +14,644 @@ import SignIn from './components/SignIn';
 import { 
   Transaction, Contact, Campaign, BankTransaction, 
   TransactionType, Category, AIChatMessage, StatusOption,
-  ZohoConfig, HistoryAction, AppStateSnapshot, LeadStatus, ResourceFile, Entity, ParsedRateItem
+  ZohoConfig, ResourceFile, Entity, ParsedRateItem
 } from './types';
 import { INITIAL_TRANSACTIONS, INITIAL_CONTACTS, RATE_CARD_SERVICES } from './constants';
-import { parseBankStatement, parseRateCard } from './services/geminiService';
+import { parseBankStatement } from './services/geminiService';
+import { fetchZohoInvoices } from './services/zohoService';
 import * as XLSX from 'xlsx';
-import { Undo2, X } from 'lucide-react';
 import { CONFIG } from './config';
 
-const generateId = () => {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
+const STORAGE_VERSION = '1.2.0';
+const generateId = () => crypto.randomUUID();
+const DEFAULT_ENTITY: Entity = { id: 'e1', name: 'Laila Mourad', initials: 'LM', color: 'bg-primary' };
+
+const getActiveEntityId = () => localStorage.getItem('app_active_entity_id') || 'e1';
+
+const safeLoad = <T,>(key: string, fallback: T): T => {
+  const entityId = getActiveEntityId();
+  const fullKey = `entity_${entityId}_${key}`;
+  const val = localStorage.getItem(fullKey);
+  if (!val) return fallback;
+  try {
+    return JSON.parse(val) as T;
+  } catch (e) {
+    return fallback;
   }
-  return 'id-' + Math.random().toString(36).substr(2, 9) + '-' + Date.now().toString(36);
-};
-
-const DEFAULT_COLUMN_WIDTHS = {
-  year: 60, project: 180, client: 150, inv: 80, cStatus: 110, lStatus: 110, invAmt: 90, vat: 70, net: 90, fee: 80, payable: 100, paid: 90
-};
-
-const DEFAULT_COLUMN_LABELS = {
-  year: 'YEAR',
-  project: 'PROJECT',
-  client: 'CLIENT',
-  inv: 'INV #',
-  cStatus: 'CLIENT STATUS',
-  lStatus: 'LADLY STATUS',
-  invAmt: 'INVOICE AMT',
-  vat: 'VAT (5%)',
-  net: 'NET',
-  fee: 'ADLY FEE',
-  payable: 'PAYABLE LM',
-  paid: 'PAID AMT'
-};
-
-const ENTITY_COLORS = [
-  'bg-teal-500', 'bg-indigo-500', 'bg-emerald-500', 'bg-rose-500', 'bg-amber-500', 
-  'bg-violet-500', 'bg-blue-500', 'bg-pink-500'
-];
-
-const DEFAULT_ENTITY: Entity = {
-  id: 'e1',
-  name: 'Laila Mourad',
-  initials: 'LM',
-  color: 'bg-primary'
 };
 
 const App: React.FC = () => {
-  const safeParse = <T,>(key: string, fallback: T): T => {
-    try {
-      const saved = localStorage.getItem(key);
-      if (!saved) return fallback;
-      return JSON.parse(saved) as T;
-    } catch (error) {
-      console.error(`Local storage parse error for key "${key}":`, error);
-      return fallback;
-    }
-  };
-
   const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('app_auth') === 'true');
+  const [currentEntityId] = useState(getActiveEntityId);
+  const [bootTime] = useState(Date.now());
+  
+  const [entities, setEntities] = useState<Entity[]>(() => {
+    const saved = localStorage.getItem('app_entities');
+    try { return saved ? JSON.parse(saved) : [DEFAULT_ENTITY]; } catch { return [DEFAULT_ENTITY]; }
+  });
 
-  // Entity Management
-  const [entities, setEntities] = useState<Entity[]>(() => safeParse('app_entities', [DEFAULT_ENTITY]));
-  const [currentEntityId, setCurrentEntityId] = useState(() => localStorage.getItem('app_active_entity_id') || 'e1');
-  const activeEntity = useMemo(() => entities.find(e => e.id === currentEntityId) || entities[0], [entities, currentEntityId]);
-
-  // Data Keys Prefixed by Entity
-  const getEntityKey = (base: string) => `entity_${currentEntityId}_${base}`;
-
+  // --- Core Data State ---
+  const [transactions, setTransactions] = useState<Transaction[]>(() => safeLoad('transactions', INITIAL_TRANSACTIONS));
+  const [contacts, setContacts] = useState<Contact[]>(() => safeLoad('contacts', INITIAL_CONTACTS));
+  const [campaignMetadata, setCampaignMetadata] = useState<Record<string, Campaign>>(() => safeLoad('campaignMetadata', {}));
+  const [bankTransactions, setBankTransactions] = useState<BankTransaction[]>(() => safeLoad('bankTransactions', []));
+  const [resources, setResources] = useState(() => safeLoad('resources', { mediaKit: null, rateCard: null }));
+  const [parsedRateCardData, setParsedRateCardData] = useState<ParsedRateItem[]>(() => safeLoad('parsedRateCard', RATE_CARD_SERVICES));
+  const [chatHistory, setChatHistory] = useState<AIChatMessage[]>(() => safeLoad('chatHistory', []));
+  const [zohoConfig, setZohoConfig] = useState<ZohoConfig>(() => safeLoad('zohoConfig', { accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' }));
+  
+  // UI Preferences
   const [activeTab, setActiveTab] = useState('dashboard'); 
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [selectedCampaignProject, setSelectedCampaignProject] = useState<string | null>(null);
-  
-  // Scoped Entity Data
-  const [transactions, setTransactions] = useState<Transaction[]>(() => safeParse(getEntityKey('transactions'), INITIAL_TRANSACTIONS));
-  const [contacts, setContacts] = useState<Contact[]>(() => safeParse(getEntityKey('contacts'), INITIAL_CONTACTS));
-  const [campaignMetadata, setCampaignMetadata] = useState<Record<string, Campaign>>(() => safeParse(getEntityKey('campaignMetadata'), {}));
-  const [bankTransactions, setBankTransactions] = useState<BankTransaction[]>(() => safeParse(getEntityKey('bankTransactions'), []));
-  const [resources, setResources] = useState<{ mediaKit: ResourceFile | null; rateCard: ResourceFile | null }>(() => safeParse(getEntityKey('resources'), { mediaKit: null, rateCard: null }));
-  const [parsedRateCardData, setParsedRateCardData] = useState<ParsedRateItem[]>(() => safeParse(getEntityKey('parsedRateCard'), RATE_CARD_SERVICES));
-  const [chatHistory, setChatHistory] = useState<AIChatMessage[]>(() => safeParse(getEntityKey('chatHistory'), []));
-  const [zohoConfig, setZohoConfig] = useState<ZohoConfig>(() => safeParse(getEntityKey('zohoConfig'), { accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' }));
-  
-  // App-wide Preferences (Not scoped to entity)
-  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => safeParse('columnWidths', DEFAULT_COLUMN_WIDTHS));
-  const [columnLabels, setColumnLabels] = useState<Record<string, string>>(() => safeParse('columnLabels', DEFAULT_COLUMN_LABELS));
-  const [dismissedTips, setDismissedTips] = useState<string[]>(() => safeParse('dismissedTips', []));
   const [theme, setTheme] = useState(() => localStorage.getItem('app-theme') || 'teal');
   const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem('app-dark-mode') === 'true');
   const [fontSize, setFontSize] = useState(() => localStorage.getItem('app-font-size') || '14');
-  const [showAedEquivalent, setShowAedEquivalent] = useState(() => localStorage.getItem('app-show-aed-equiv') === 'true');
+  const [showAedEquivalent, setShowAedEquivalent] = useState(() => localStorage.getItem('app-show-aed-equiv') !== 'false');
+  const [columnWidths, setColumnWidths] = useState(() => JSON.parse(localStorage.getItem('columnWidths') || '{}'));
+  const [columnLabels, setColumnLabels] = useState(() => JSON.parse(localStorage.getItem('columnLabels') || '{}'));
+  const [dismissedTips, setDismissedTips] = useState(() => JSON.parse(localStorage.getItem('dismissedTips') || '[]'));
 
-  const [isProcessingBank, setIsProcessingBank] = useState(false);
-  const [bankProgress, setBankProgress] = useState(0);
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
-  const [isParsingRateCard, setIsParsingRateCard] = useState(false);
+  const [isProcessingBanking, setIsProcessingBanking] = useState(false);
+  const [isSyncingZoho, setIsSyncingZoho] = useState(false);
+  const [bankingProgress, setBankingProgress] = useState(0);
+  const [bankingStatus, setBankingStatus] = useState('');
 
-  const [historyStack, setHistoryStack] = useState<HistoryAction[]>([]);
-  const [showUndoToast, setShowUndoToast] = useState(false);
+  // Folder Navigation State
+  const [selectedProjectName, setSelectedProjectName] = useState<string | null>(null);
 
-  // Sync Persistence
-  useEffect(() => { localStorage.setItem(getEntityKey('transactions'), JSON.stringify(transactions)); }, [transactions, currentEntityId]);
-  useEffect(() => { localStorage.setItem(getEntityKey('contacts'), JSON.stringify(contacts)); }, [contacts, currentEntityId]);
-  useEffect(() => { localStorage.setItem(getEntityKey('campaignMetadata'), JSON.stringify(campaignMetadata)); }, [campaignMetadata, currentEntityId]);
-  useEffect(() => { localStorage.setItem(getEntityKey('bankTransactions'), JSON.stringify(bankTransactions)); }, [bankTransactions, currentEntityId]);
-  useEffect(() => { localStorage.setItem(getEntityKey('resources'), JSON.stringify(resources)); }, [resources, currentEntityId]);
-  useEffect(() => { localStorage.setItem(getEntityKey('parsedRateCard'), JSON.stringify(parsedRateCardData)); }, [parsedRateCardData, currentEntityId]);
-  useEffect(() => { localStorage.setItem(getEntityKey('chatHistory'), JSON.stringify(chatHistory)); }, [chatHistory, currentEntityId]);
-  useEffect(() => { localStorage.setItem(getEntityKey('zohoConfig'), JSON.stringify(zohoConfig)); }, [zohoConfig, currentEntityId]);
-  
-  useEffect(() => { 
-    localStorage.setItem('app_entities', JSON.stringify(entities));
-    localStorage.setItem('app_active_entity_id', currentEntityId);
-    localStorage.setItem('columnLabels', JSON.stringify(columnLabels));
-  }, [entities, currentEntityId, columnLabels]);
+  // Auto-Discovery logic: Campaigns derived from unique projects in ledger + existing metadata
+  const autoDiscoveredCampaigns = useMemo(() => {
+    const list: Record<string, Campaign> = { ...campaignMetadata };
+    transactions.forEach(t => {
+      if (t.project && !list[t.project]) {
+        list[t.project] = { projectName: t.project, files: [], deliverables: [] };
+      }
+    });
+    return Object.values(list);
+  }, [transactions, campaignMetadata]);
 
-  useEffect(() => {
-    localStorage.setItem('app_auth', isAuthenticated.toString());
-  }, [isAuthenticated]);
+  const diskSave = useCallback((subKey: string, data: any) => {
+    const entityId = getActiveEntityId();
+    const fullKey = `entity_${entityId}_${subKey}`;
+    localStorage.setItem(fullKey, JSON.stringify(data));
+    localStorage.setItem('app_storage_version', STORAGE_VERSION);
+  }, []);
 
-  // Handle Switch Entity
-  const handleSwitchEntity = (id: string) => {
-    setCurrentEntityId(id);
-    // Reload state from new entity namespace
-    setTransactions(safeParse(`entity_${id}_transactions`, INITIAL_TRANSACTIONS));
-    setContacts(safeParse(`entity_${id}_contacts`, INITIAL_CONTACTS));
-    setCampaignMetadata(safeParse(`entity_${id}_campaignMetadata`, {}));
-    setBankTransactions(safeParse(`entity_${id}_bankTransactions`, []));
-    setResources(safeParse(`entity_${id}_resources`, { mediaKit: null, rateCard: null }));
-    setParsedRateCardData(safeParse(`entity_${id}_parsedRateCard`, RATE_CARD_SERVICES));
-    setChatHistory(safeParse(`entity_${id}_chatHistory`, []));
-    setZohoConfig(safeParse(`entity_${id}_zohoConfig`, { accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' }));
-    
-    // Reset view specific state
-    setSelectedCampaignProject(null);
-    setHistoryStack([]);
-    setShowUndoToast(false);
-  };
+  const updateTransactions = useCallback((data: Transaction[]) => { 
+    setTransactions(data); 
+    diskSave('transactions', data); 
+  }, [diskSave]);
 
-  const handleCreateEntity = (name: string, logo?: string) => {
-    const id = generateId();
-    const initials = name.split(/\s+/).map(p => p[0]).join('').substring(0, 2).toUpperCase();
-    const color = ENTITY_COLORS[entities.length % ENTITY_COLORS.length];
-    
-    const newEntity: Entity = { id, name, initials, color, logo };
-    setEntities(prev => [...prev, newEntity]);
-    handleSwitchEntity(id);
-  };
+  const updateBankTransactions = useCallback((data: BankTransaction[]) => { 
+    setBankTransactions(data); 
+    diskSave('bankTransactions', data); 
+  }, [diskSave]);
 
-  const handleUpdateEntity = (id: string, updates: Partial<Entity>) => {
-    setEntities(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
-  };
-
-  const handleDeleteEntity = (id: string) => {
-    if (entities.length <= 1) {
-      alert("System safety: At least one corporate profile must remain active.");
+  const handleZohoSync = async () => {
+    if (!zohoConfig.accessToken || !zohoConfig.organizationId) {
+      alert("Please configure Zoho API credentials in Settings first.");
       return;
     }
-    if (confirm("Archiving this profile will hide its history but retain local storage keys. Proceed?")) {
-      const remaining = entities.filter(e => e.id !== id);
-      setEntities(remaining);
-      if (currentEntityId === id) {
-        handleSwitchEntity(remaining[0].id);
-      }
+
+    setIsSyncingZoho(true);
+    try {
+      const zohoInvoices = await fetchZohoInvoices(zohoConfig);
+      
+      setTransactions(prev => {
+        const next = [...prev];
+        zohoInvoices.forEach(zi => {
+          // Check if invoice already exists by Zoho ID or Invoice Number
+          const existingIdx = next.findIndex(t => 
+            (t.zohoInvoiceId && t.zohoInvoiceId === zi.zohoInvoiceId) || 
+            (t.invoiceNumber && t.invoiceNumber === zi.invoiceNumber)
+          );
+
+          if (existingIdx > -1) {
+            // Update existing record with Zoho's latest data
+            next[existingIdx] = { 
+              ...next[existingIdx], 
+              clientStatus: zi.clientStatus,
+              amount: zi.amount,
+              currency: zi.currency,
+              zohoInvoiceId: zi.zohoInvoiceId
+            };
+          } else {
+            // Add new Zoho record
+            next.unshift(zi);
+          }
+        });
+        diskSave('transactions', next);
+        return next;
+      });
+
+      const updatedConfig = { ...zohoConfig, lastSync: new Date().toLocaleString() };
+      setZohoConfig(updatedConfig);
+      diskSave('zohoConfig', updatedConfig);
+      alert(`Sync Complete: Synchronized ${zohoInvoices.length} invoices from Zoho Books.`);
+    } catch (err) {
+      alert(`Sync Failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsSyncingZoho(false);
     }
   };
 
-  const handleSignOut = () => {
-    setIsAuthenticated(false);
-  };
+  const handleUpdateTransaction = useCallback((updatedT: Transaction) => {
+    setTransactions(prev => {
+      const next = prev.map(t => t.id === updatedT.id ? updatedT : t);
+      diskSave('transactions', next);
+      return next;
+    });
+  }, [diskSave]);
 
-  useEffect(() => {
-    document.documentElement.className = `theme-${theme} ${isDarkMode ? 'dark' : ''}`;
-    document.documentElement.style.setProperty('--root-font-size', `${fontSize}px`);
-    localStorage.setItem('app-theme', theme);
-    localStorage.setItem('app-dark-mode', isDarkMode.toString());
-    localStorage.setItem('app-font-size', fontSize);
-    localStorage.setItem('app-show-aed-equiv', showAedEquivalent.toString());
-  }, [theme, isDarkMode, fontSize, showAedEquivalent]);
-
-  const recordHistory = useCallback((description: string) => {
-    const snapshot: AppStateSnapshot = {
-      transactions: [...transactions],
-      contacts: [...contacts],
-      campaignMetadata: { ...campaignMetadata },
-      bankTransactions: [...bankTransactions],
-      resources: { ...resources }
-    };
-    const newAction: HistoryAction = {
-      id: generateId(),
-      description,
-      timestamp: Date.now(),
-      snapshot
-    };
-    setHistoryStack(prev => [newAction, ...prev].slice(0, 20));
-    setShowUndoToast(true);
-    const timer = setTimeout(() => setShowUndoToast(false), 10000);
-    return () => clearTimeout(timer);
-  }, [transactions, contacts, campaignMetadata, bankTransactions, resources]);
-
-  const handleUndo = useCallback(() => {
-    if (historyStack.length === 0) return;
-    const [lastAction, ...remainingStack] = historyStack;
-    const { snapshot } = lastAction;
-    setTransactions(snapshot.transactions);
-    setContacts(snapshot.contacts);
-    setCampaignMetadata(snapshot.campaignMetadata);
-    setBankTransactions(snapshot.bankTransactions);
-    setResources(snapshot.resources);
-    setHistoryStack(remainingStack);
-    if (remainingStack.length === 0) setShowUndoToast(false);
-  }, [historyStack]);
-
-  const handleUpdateResources = async (updates: Partial<{ mediaKit: ResourceFile | null; rateCard: ResourceFile | null }>) => {
-    recordHistory(`Updated resources`);
-    setResources(prev => ({ ...prev, ...updates }));
-
-    if (updates.rateCard) {
-      setIsParsingRateCard(true);
-      try {
-        const parsed = await parseRateCard(updates.rateCard.base64, updates.rateCard.type);
-        if (parsed.length > 0) {
-          setParsedRateCardData(parsed);
-        }
-      } catch (err) {
-        console.error("Failed to parse rate card:", err);
-      } finally {
-        setIsParsingRateCard(false);
-      }
-    }
-  };
-
-  const handleStatementUpload = async (file: File) => {
-    setIsProcessingBank(true);
-    setBankProgress(10);
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        setBankProgress(30);
-        const readerResult = reader.result as string;
-        const base64 = readerResult.split(',')[1];
+  const handleStatementUpload = async (files: File[]) => {
+    setIsProcessingBanking(true);
+    setBankingProgress(0);
+    setBankingStatus('Analyzing Statements...');
+    let allParsed: BankTransaction[] = [];
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setBankingStatus(`Reading ${file.name}...`);
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.readAsDataURL(file);
+        });
         const extracted = await parseBankStatement(base64, file.type);
-        setBankProgress(80);
-        const newBankItems: BankTransaction[] = extracted.map(item => ({
-          ...item,
-          id: generateId()
-        }));
-        if (newBankItems.length > 0) {
-          recordHistory(`Imported ${newBankItems.length} bank transactions`);
-          setBankTransactions(prev => [...newBankItems, ...prev]);
-        }
-        setBankProgress(100);
-      } catch (error) {
-        console.error("Statement Parsing Error:", error);
-        alert("Failed to parse statement.");
-      } finally {
-        setTimeout(() => {
-          setIsProcessingBank(false);
-          setBankProgress(0);
-        }, 500);
+        allParsed = [...allParsed, ...extracted];
+        setBankingProgress(Math.round(((i + 1) / files.length) * 100));
       }
-    };
-    reader.readAsDataURL(file);
+      if (allParsed.length > 0) {
+        setBankTransactions(prev => {
+          const existing = new Set(prev.map(b => `${b.date}_${b.amount}_${b.description.toLowerCase()}`));
+          const filtered = allParsed.filter(b => !existing.has(`${b.date}_${b.amount}_${b.description.toLowerCase()}`));
+          const next = [...filtered, ...prev];
+          diskSave('bankTransactions', next);
+          return next;
+        });
+      }
+    } catch (err) { setBankingStatus('Import error.'); } finally { setTimeout(() => { setIsProcessingBanking(false); setBankingStatus(''); }, 2000); }
   };
+
+  const handleAddExpenseFromBank = useCallback((bankTx: BankTransaction, category: Category) => {
+    const expenseId = generateId();
+    const newExpense: Transaction = {
+        id: expenseId,
+        year: new Date(bankTx.date).getFullYear(),
+        date: bankTx.date,
+        project: bankTx.vendor || bankTx.description,
+        customerName: bankTx.vendor,
+        description: bankTx.description,
+        amount: bankTx.amount,
+        currency: 'AED',
+        category: category,
+        type: TransactionType.EXPENSE,
+        clientStatus: 'Paid',
+        ladlyStatus: 'Paid',
+        paymentToLmRef: bankTx.id
+    };
+    
+    setTransactions(prev => {
+      const next = [newExpense, ...prev];
+      diskSave('transactions', next);
+      return next;
+    });
+
+    setBankTransactions(prev => {
+      const next = prev.map(bt => bt.id === bankTx.id ? { ...bt, matchedTransactionId: expenseId, category: category } : bt);
+      diskSave('bankTransactions', next);
+      return next;
+    });
+  }, [diskSave]);
+
+  const handleLinkBankToLedger = useCallback((bankId: string, ledgerIds: string | string[]) => {
+    const targetLedgerIds = Array.isArray(ledgerIds) ? ledgerIds : [ledgerIds];
+    const bankItem = bankTransactions.find(b => b.id === bankId);
+    if (!bankItem) return;
+    const type = bankItem.type === 'credit' ? 'client' : 'laila';
+
+    setBankTransactions(prevBanks => {
+      const nextBanks = prevBanks.map(b => b.id === bankId ? { ...b, matchedTransactionId: targetLedgerIds.join(', ') } : b);
+      diskSave('bankTransactions', nextBanks);
+      return nextBanks;
+    });
+
+    setTransactions(prevLedger => {
+      const nextLedger = prevLedger.map(t => {
+        if (targetLedgerIds.includes(t.id)) {
+          const updated = { ...t };
+          if (type === 'client') {
+            updated.clientStatus = 'Paid';
+            const existingRefs = updated.referenceNumber ? updated.referenceNumber.split(', ') : [];
+            if (!existingRefs.includes(bankId)) {
+                updated.referenceNumber = [...existingRefs, bankId].join(', ');
+            }
+          } else {
+            updated.ladlyStatus = 'Paid';
+            const existingRefs = updated.paymentToLmRef ? updated.paymentToLmRef.split(', ') : [];
+            if (!existingRefs.includes(bankId)) {
+                updated.paymentToLmRef = [...existingRefs, bankId].join(', ');
+            }
+          }
+          return updated;
+        }
+        return t;
+      });
+      diskSave('transactions', nextLedger);
+      return nextLedger;
+    });
+  }, [bankTransactions, diskSave]);
 
   const processExcelFile = async (file: File) => {
     setIsProcessingExcel(true);
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
-        const bstr = evt.target?.result as string;
-        const wb = XLSX.read(bstr, { type: 'binary', cellDates: true });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, raw: true });
-        if (!data || data.length < 1) return;
+        if (!evt.target?.result) return;
+        const dataArr = new Uint8Array(evt.target.result as ArrayBuffer);
+        const wb = XLSX.read(dataArr, { type: 'array', cellDates: true });
+        const rawRows = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true });
+        if (!rawRows || rawRows.length < 1) return;
         
-        const headerRow = data[0];
-        const headers = headerRow.map(h => (h || '').toString().toLowerCase().trim());
-        const rows = data.slice(1);
-        const findIdx = (keywords: string[]) => headers.findIndex(h => h && keywords.some(k => h.includes(k)));
+        let headerIndex = 0;
+        for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
+           const rowStr = (rawRows[i] || []).join(' ').toLowerCase();
+           if (rowStr.includes('project') || rowStr.includes('invamt') || rowStr.includes('amount') || rowStr.includes('client')) {
+             headerIndex = i;
+             break;
+           }
+        }
+        
+        const headers = rawRows[headerIndex].map((h: any) => (h || '').toString().toLowerCase().trim());
+        const dataRows = rawRows.slice(headerIndex + 1);
+        const findIdx = (keywords: string[]) => headers.findIndex((h: string) => h && keywords.some(k => h.includes(k)));
         
         const idx = {
-          year: findIdx(['year']), 
-          project: findIdx(['project', 'campaign', 'name', 'item', 'description']),
-          client: findIdx(['client', 'customer', 'brand']), 
-          invNo: findIdx(['invoice #', 'inv #', 'invoice number', 'ref']),
-          amount: findIdx(['invoice amt', 'invoice amount', 'amount', 'total', 'price', 'value']), 
-          date: findIdx(['date', 'payment date', 'created']),
-          clientStatus: findIdx(['client status', 'status', 'payment status']),
-          ladlyStatus: findIdx(['ladly status', 'ladly', 'internal status', 'lm status'])
+          year: findIdx(['year']),
+          project: findIdx(['project', 'campaign', 'folder']),
+          client: findIdx(['client', 'customer', 'brand']),
+          amount: findIdx(['invamt', 'invoice amt', 'amount', 'total', 'gross']),
+          date: findIdx(['date', 'day']),
+          inv: findIdx(['inv #', 'invoice number', 'inv']),
+          cStatus: findIdx(['client status', 'cstatus', 'status']),
+          lStatus: findIdx(['ladly status', 'lstatus']),
+          pDate: findIdx(['payment date', 'paid date', 'date paid'])
         };
 
-        const mapToStatusOption = (val: any): StatusOption => {
-          if (!val) return 'Pending';
-          const s = val.toString().trim().toLowerCase();
-          if (s.includes('paid to personal')) return 'Paid to personal account';
+        const mapStatus = (val: any): StatusOption => {
+          const s = String(val || '').trim().toLowerCase();
+          if (s.includes('paid to per')) return 'Paid to personal account';
           if (s.includes('paid')) return 'Paid';
           if (s.includes('unpaid')) return 'Unpaid';
-          if (s.includes('pending')) return 'Pending';
           if (s.includes('overdue')) return 'Overdue';
           if (s.includes('void')) return 'Void';
           if (s.includes('draft')) return 'Draft';
           return 'Pending';
         };
 
-        const newTransactions: Transaction[] = rows
-          .filter(row => {
-            if (!row || row.length === 0) return false;
-            const projectVal = idx.project !== -1 ? (row[idx.project]?.toString() || '').trim() : '';
-            const amountVal = idx.amount !== -1 ? (parseFloat(String(row[idx.amount])) || 0) : 0;
-            return projectVal !== '' && amountVal !== 0;
-          })
-          .map(row => {
-            const amount = parseFloat(String(idx.amount !== -1 ? row[idx.amount] : 0)) || 0;
+        const newItems: Transaction[] = dataRows
+          .filter(r => (idx.project >= 0 && r[idx.project]) || (idx.amount >= 0 && r[idx.amount]))
+          .map(r => {
+            const rawAmount = r[idx.amount];
+            const amount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount || '0').replace(/[^0-9.-]+/g,"")) || 0;
             const net = amount / (1 + CONFIG.VAT_RATE);
-            let dateStr = new Date().toISOString().split('T')[0];
-            const rawDate = idx.date !== -1 ? row[idx.date] : null;
-            
-            if (rawDate instanceof Date) {
-              dateStr = rawDate.toISOString().split('T')[0];
-            } else if (typeof rawDate === 'number') {
-              const d = new Date((rawDate - (25567 + 1)) * 86400 * 1000);
-              dateStr = d.toISOString().split('T')[0];
-            }
+            const vat = amount - net;
+            const adlyFee = net * CONFIG.ADLY_FEE_RATE;
+            const payableLm = net - adlyFee;
+            const transferToLm = payableLm * (1 + CONFIG.VAT_RATE);
+            const rawDate = r[idx.date];
+            const dateStr = rawDate instanceof Date ? rawDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+            const yearVal = idx.year >= 0 && r[idx.year] ? parseInt(String(r[idx.year])) : new Date(dateStr).getFullYear();
 
             return {
-              id: generateId(), 
-              year: parseInt(String(idx.year !== -1 ? row[idx.year] : '')) || new Date().getFullYear(), 
+              id: generateId(),
+              year: isNaN(yearVal) ? new Date().getFullYear() : yearVal,
               date: dateStr,
-              project: (idx.project !== -1 ? row[idx.project] : 'Imported')?.toString().trim() || 'Imported',
-              customerName: (idx.client !== -1 ? row[idx.client] : '')?.toString() || '', 
-              description: '',
-              invoiceNumber: (idx.invNo !== -1 ? row[idx.invNo] : '')?.toString() || '', 
-              clientStatus: mapToStatusOption(idx.clientStatus !== -1 ? row[idx.clientStatus] : 'Pending'), 
-              ladlyStatus: mapToStatusOption(idx.ladlyStatus !== -1 ? row[idx.ladlyStatus] : 'Pending'),
-              amount: amount, 
-              vat: Number((amount - net).toFixed(2)), 
-              net: Number(net.toFixed(2)), 
-              fee: Number((net * CONFIG.ADLY_FEE_RATE).toFixed(2)),
-              payable: Number((net * (1 - CONFIG.ADLY_FEE_RATE)).toFixed(2)), 
-              type: TransactionType.INCOME, 
-              currency: 'AED', 
-              category: Category.FREELANCE
-            };
+              project: String(r[idx.project] || r[idx.client] || 'New Campaign'),
+              customerName: String(r[idx.client] || ''),
+              invoiceNumber: idx.inv >= 0 ? String(r[idx.inv] || '') : undefined,
+              amount: Number(amount.toFixed(2)),
+              vat: Number(vat.toFixed(2)),
+              net: Number(net.toFixed(2)),
+              fee: Number(adlyFee.toFixed(2)),
+              payable: Number(payableLm.toFixed(2)),
+              clientPayment: Number(transferToLm.toFixed(2)),
+              type: TransactionType.INCOME,
+              currency: 'AED',
+              category: Category.FREELANCE,
+              clientStatus: mapStatus(idx.cStatus >= 0 ? r[idx.cStatus] : 'Pending'),
+              ladlyStatus: mapStatus(idx.lStatus >= 0 ? r[idx.lStatus] : 'Pending'),
+              clientPaymentDate: idx.pDate >= 0 ? String(r[idx.pDate] || '') : undefined
+            } as Transaction;
           });
 
-        if (newTransactions.length > 0) {
-          recordHistory(`Imported ${newTransactions.length} Excel rows`);
-          setTransactions(prev => [...newTransactions, ...prev]);
+        if (newItems.length > 0) {
+          setTransactions(prev => {
+            const next = [...newItems, ...prev];
+            diskSave('transactions', next);
+            return next;
+          });
         }
-      } catch (error) { 
-        console.error("Excel Import Error:", error); 
-      } finally { 
-        setIsProcessingExcel(false); 
-      }
+      } catch (err) { console.error("Excel Parsing Error:", err); } finally { setIsProcessingExcel(false); }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
-  const handleMergeCampaigns = (sourceNames: string[], targetName: string) => {
-    recordHistory(`Merged campaigns into ${targetName}`);
-    setTransactions(prevT => prevT.map(t => {
-      if (sourceNames.includes(t.project)) return { ...t, project: targetName, mergedFrom: t.mergedFrom || t.project };
-      return t;
-    }));
-    setCampaignMetadata(prevMeta => {
-      const newMeta = { ...prevMeta };
-      const mergedData: Campaign = { projectName: targetName, notes: '', files: [], deliverables: [] };
-      sourceNames.forEach(name => {
-        const data = newMeta[name];
-        if (data) {
-          if (data.notes) mergedData.notes += (mergedData.notes ? '\n\n' : '') + data.notes;
-          if (data.files) mergedData.files = [...(mergedData.files || []), ...data.files];
-          if (data.deliverables) mergedData.deliverables = [...(mergedData.deliverables || []), ...data.deliverables];
-          delete newMeta[name];
-        }
-      });
-      newMeta[targetName] = mergedData;
-      return newMeta;
-    });
-    if (selectedCampaignProject && sourceNames.includes(selectedCampaignProject)) setSelectedCampaignProject(targetName);
-  };
+  useEffect(() => {
+    localStorage.setItem('app-theme', theme);
+    localStorage.setItem('app-dark-mode', isDarkMode.toString());
+    localStorage.setItem('app-font-size', fontSize);
+    localStorage.setItem('app-show-aed-equiv', showAedEquivalent.toString());
+    localStorage.setItem('columnWidths', JSON.stringify(columnWidths));
+    localStorage.setItem('columnLabels', JSON.stringify(columnLabels));
+    localStorage.setItem('dismissedTips', JSON.stringify(dismissedTips));
+    document.documentElement.className = `theme-${theme} ${isDarkMode ? 'dark' : ''}`;
+  }, [theme, isDarkMode, fontSize, showAedEquivalent, columnWidths, columnLabels, dismissedTips]);
 
-  const handleUpdateCampaignMetadata = (projectName: string, metadata: Partial<Campaign>) => {
-    recordHistory(`Updated campaign: ${projectName}`);
-    setCampaignMetadata(prev => {
-      if (metadata.projectName && metadata.projectName !== projectName) {
-        const newName = metadata.projectName;
-        const newMeta = { ...prev };
-        const oldData = newMeta[projectName] || { projectName, notes: '', files: [], deliverables: [] };
-        setTransactions(prevT => prevT.map(t => t.project === projectName ? { ...t, project: newName } : t));
-        newMeta[newName] = { ...oldData, ...metadata, projectName: newName };
-        delete newMeta[projectName];
-        if (selectedCampaignProject === projectName) setSelectedCampaignProject(newName);
-        return newMeta;
-      }
-      return { ...prev, [projectName]: { projectName, notes: metadata.notes ?? prev[projectName]?.notes ?? '', files: metadata.files ?? prev[projectName]?.files ?? [], deliverables: metadata.deliverables ?? prev[projectName]?.deliverables ?? [] } };
-    });
-  };
+  if (!isAuthenticated) return <SignIn onSignIn={() => { setIsAuthenticated(true); localStorage.setItem('app_auth', 'true'); }} isDarkMode={isDarkMode} onToggleDarkMode={setIsDarkMode} />;
 
-  const handleAddTransaction = (t: Transaction) => { recordHistory(`Added: ${t.project}`); setTransactions(prev => [t, ...prev]); };
-  const handleUpdateTransaction = useCallback((updatedT: Transaction) => { recordHistory(`Updated: ${updatedT.project}`); setTransactions(prev => prev.map(t => t.id === updatedT.id ? updatedT : t)); }, [recordHistory]);
-  const handleDeleteTransaction = (id: string) => { const t = transactions.find(item => item.id === id); recordHistory(`Deleted: ${t?.project}`); setTransactions(prev => prev.filter(t => t.id !== id)); };
-  const handleAddContact = (c: Contact) => { recordHistory(`Added contact: ${c.name}`); setContacts(prev => [c, ...prev]); };
-  const handleDeleteContact = (id: string) => { const c = contacts.find(item => item.id === id); recordHistory(`Deleted contact: ${c?.name}`); setContacts(prev => prev.filter(c => c.id !== id)); };
-  const handleUpdateContactStatus = (id: string, status: LeadStatus) => { recordHistory(`Updated status`); setContacts(prev => prev.map(c => c.id === id ? { ...c, status } : c)); };
-  const handleNavigateToCampaign = (projectName: string) => { setSelectedCampaignProject(projectName); setActiveTab('campaigns'); setIsAiOpen(false); };
-  const handleBulkUpdateTransactions = (ids: string[], updates: Partial<Transaction>) => { recordHistory(`Bulk update`); const idSet = new Set(ids); setTransactions(prev => prev.map(t => idSet.has(t.id) ? { ...t, ...updates } : t)); };
-  const handleBulkDeleteTransactions = (ids: string[]) => { recordHistory(`Bulk delete`); const idSet = new Set(ids); setTransactions(prev => prev.filter(t => !idSet.has(t.id))); };
-  const handleAddCampaign = (projectName: string) => { recordHistory(`New folder: ${projectName}`); handleUpdateCampaignMetadata(projectName, { notes: '', files: [], deliverables: [] }); };
-  const handleDismissTip = (tipId: string) => { setDismissedTips(prev => [...prev, tipId]); };
-  const handleUpdateColumnLabel = (key: string, label: string) => { setColumnLabels(prev => ({ ...prev, [key]: label })); };
-
-  const derivedCampaigns = useMemo(() => {
-    const projectNames = new Set<string>();
-    transactions.forEach(t => projectNames.add(t.project));
-    Object.keys(campaignMetadata).forEach(name => projectNames.add(name));
-    return Array.from(projectNames).map(name => ({ projectName: name, ...(campaignMetadata[name] || { notes: '', files: [], deliverables: [] }) }));
-  }, [transactions, campaignMetadata]);
-
-  if (!isAuthenticated) {
-    return <SignIn onSignIn={() => setIsAuthenticated(true)} isDarkMode={isDarkMode} onToggleDarkMode={setIsDarkMode} />;
-  }
+  const activeEntity = entities.find(e => e.id === currentEntityId) || entities[0];
 
   return (
     <Layout 
-      activeTab={activeTab} setActiveTab={setActiveTab} isAnyProcessing={isProcessingBank || isProcessingExcel || isParsingRateCard}
-      isAiOpen={isAiOpen} onToggleAi={() => setIsAiOpen(!isAiOpen)} onOpenSettings={() => setIsSettingsOpen(true)}
-      onSignOut={handleSignOut}
-      entities={entities} activeEntity={activeEntity} onSwitchEntity={handleSwitchEntity} onCreateEntity={handleCreateEntity}
-      onUpdateEntity={handleUpdateEntity} onDeleteEntity={handleDeleteEntity}
+      activeTab={activeTab} setActiveTab={setActiveTab} 
+      isAnyProcessing={isProcessingExcel || isProcessingBanking || isSyncingZoho} 
+      isAiOpen={isAiOpen} onToggleAi={() => setIsAiOpen(!isAiOpen)} 
+      onOpenSettings={() => setIsSettingsOpen(true)} 
+      onSignOut={() => { setIsAuthenticated(false); localStorage.setItem('app_auth', 'false'); }} 
+      entities={entities} activeEntity={activeEntity} 
+      onSwitchEntity={(id) => { localStorage.setItem('app_active_entity_id', id); window.location.reload(); }}
+      onCreateEntity={(n, l) => { 
+        const id = generateId(); 
+        const next = [...entities, { id, name: n, logo: l, initials: n.substring(0,2).toUpperCase(), color: 'bg-primary' }]; 
+        setEntities(next); localStorage.setItem('app_entities', JSON.stringify(next));
+      }} 
+      onUpdateEntity={(id, u) => { 
+        const next = entities.map(e => e.id === id ? {...e, ...u} : e); 
+        setEntities(next); localStorage.setItem('app_entities', JSON.stringify(next)); 
+      }} 
+      onDeleteEntity={(id) => { 
+        if (entities.length > 1) { 
+          const next = entities.filter(e => e.id !== id); 
+          setEntities(next); localStorage.setItem('app_entities', JSON.stringify(next)); 
+        } 
+      }}
+      ledgerCount={transactions.length}
+      bankTxCount={bankTransactions.length}
     >
-      {activeTab === 'dashboard' && <Dashboard transactions={transactions} contacts={contacts} bankTransactions={bankTransactions} showAedEquivalent={showAedEquivalent} />}
-      {activeTab === 'finance' && <FinanceTracker transactions={transactions} onAddTransaction={handleAddTransaction} onUpdateTransaction={handleUpdateTransaction} onBulkUpdateTransactions={handleBulkUpdateTransactions} onDeleteTransaction={handleDeleteTransaction} onBulkDeleteTransactions={handleBulkDeleteTransactions} onExcelImport={processExcelFile} isProcessing={isProcessingExcel} columnWidths={columnWidths} onColumnWidthChange={setColumnWidths} columnLabels={columnLabels} onUpdateColumnLabel={handleUpdateColumnLabel} showAedEquivalent={showAedEquivalent} />}
-      {activeTab === 'banking' && <BankingComponent bankTransactions={bankTransactions} transactions={transactions} onUpdateBankTransaction={(bt) => { recordHistory(`Reconciled: ${bt.vendor}`); setBankTransactions(prev => prev.map(item => item.id === bt.id ? bt : item)); }} onUpdateTransaction={handleUpdateTransaction} onClearBankTransactions={() => { recordHistory("Cleared bank items"); setBankTransactions([]); }} onStatementUpload={handleStatementUpload} isProcessing={isProcessingBank} progress={bankProgress} showAedEquivalent={showAedEquivalent} />}
-      {activeTab === 'tax' && <VatCenter transactions={transactions} showAedEquivalent={showAedEquivalent} dismissedTips={dismissedTips} onDismissTip={handleDismissTip} onOpenAi={() => setIsAiOpen(true)} />}
-      {activeTab === 'campaigns' && <CampaignTracker transactions={transactions} campaigns={derivedCampaigns} rateCard={parsedRateCardData} onUpdateCampaign={handleUpdateCampaignMetadata} onMergeCampaigns={handleMergeCampaigns} onAddCampaign={handleAddCampaign} selectedProjectName={selectedCampaignProject} setSelectedProjectName={setSelectedCampaignProject} showAedEquivalent={showAedEquivalent} />}
-      {activeTab === 'crm' && <CRM contacts={contacts} onAddContact={handleAddContact} onDeleteContact={handleDeleteContact} onUpdateStatus={handleUpdateContactStatus} dismissedTips={dismissedTips} onDismissTip={handleDismissTip} />}
-      {activeTab === 'resources' && <Resources resources={resources} rateCardData={parsedRateCardData} onUpdateResources={handleUpdateResources} onUpdateRateCardData={setParsedRateCardData} />}
-
-      <Settings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} config={zohoConfig} onSaveConfig={setZohoConfig} onSync={async () => {}} isSyncing={false} onClearData={() => { setTransactions([]); setContacts([]); setCampaignMetadata({}); setBankTransactions([]); setResources({ mediaKit: null, rateCard: null }); }} onExport={() => {}} onImport={() => {}} theme={theme} onSetTheme={setTheme} isDarkMode={isDarkMode} onSetDarkMode={setIsDarkMode} fontSize={fontSize} onSetFontSize={setFontSize} showAedEquivalent={showAedEquivalent} onSetShowAedEquivalent={setShowAedEquivalent} />
-      <AIChat isOpen={isAiOpen} onClose={() => setIsAiOpen(false)} transactions={transactions} contacts={contacts} campaigns={derivedCampaigns} history={chatHistory} onUpdateHistory={setChatHistory} onNavigateToCampaign={handleNavigateToCampaign} />
-
-      {showUndoToast && historyStack.length > 0 && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[2000] animate-in slide-in-from-top-10 duration-500 w-fit">
-          <div className="bg-primary backdrop-blur-md text-primary-foreground px-4 py-2 rounded-full shadow-2xl flex items-center gap-4 border border-white/10 min-w-[280px]">
-             <div className="flex-1 min-w-0"><p className="text-[10px] font-black opacity-50 uppercase tracking-widest leading-none mb-1">Undo Last Action</p><p className="text-[11px] font-bold truncate">{historyStack[0].description}</p></div>
-             <div className="flex items-center gap-1.5 shrink-0"><button onClick={handleUndo} className="bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 shadow-lg active:scale-95"><Undo2 size={12} />Undo</button><button onClick={() => setShowUndoToast(false)} className="p-1.5 opacity-50 hover:opacity-100 transition-opacity"><X size={14} /></button></div>
-          </div>
-        </div>
+      {activeTab === 'dashboard' && <Dashboard transactions={transactions} showAedEquivalent={showAedEquivalent} />}
+      {activeTab === 'finance' && (
+        <FinanceTracker 
+          transactions={transactions} 
+          onAddTransaction={(t) => updateTransactions([t, ...transactions])} 
+          onUpdateTransaction={handleUpdateTransaction} 
+          onBulkUpdateTransactions={(ids, u) => {
+            setTransactions(prev => {
+              const next = prev.map(t => ids.includes(t.id) ? {...t, ...u} : t);
+              diskSave('transactions', next);
+              return next;
+            });
+          }} 
+          onDeleteTransaction={(id) => {
+            setTransactions(prev => {
+              const next = prev.filter(t => t.id !== id);
+              diskSave('transactions', next);
+              return next;
+            });
+          }} 
+          onBulkDeleteTransactions={(ids) => {
+            setTransactions(prev => {
+              const next = prev.filter(t => !ids.includes(t.id));
+              diskSave('transactions', next);
+              return next;
+            });
+          }} 
+          onExcelImport={processExcelFile} 
+          isProcessing={isProcessingExcel} 
+          columnWidths={columnWidths} onColumnWidthChange={setColumnWidths} 
+          columnLabels={columnLabels} onUpdateColumnLabel={(k, l) => setColumnLabels(p => ({...p, [k]: l}))} 
+          showAedEquivalent={showAedEquivalent} bankTransactions={bankTransactions} 
+          onReconcile={(tId, bIds, type) => {
+            setTransactions(prev => {
+              const next = prev.map(t => {
+                if (t.id === tId) {
+                  const updated = { ...t };
+                  if (type === 'client') { updated.clientStatus = 'Paid'; updated.referenceNumber = bIds.join(', '); }
+                  else { updated.ladlyStatus = 'Paid'; updated.paymentToLmRef = bIds.join(', '); }
+                  return updated;
+                }
+                return t;
+              });
+              diskSave('transactions', next);
+              return next;
+            });
+            setBankTransactions(prev => {
+              const next = prev.map(bt => bIds.includes(bt.id) ? { ...bt, matchedTransactionId: tId } : bt);
+              diskSave('bankTransactions', next);
+              return next;
+            });
+          }} 
+          onUnlink={(tId, type) => {
+            let matchedRefs = '';
+            setTransactions(prev => {
+              const next = prev.map(t => {
+                if (t.id === tId) {
+                  const updated = { ...t };
+                  matchedRefs = (type === 'client' ? t.referenceNumber : t.paymentToLmRef) || '';
+                  if (type === 'client') { updated.referenceNumber = undefined; updated.clientStatus = 'Pending'; }
+                  else { updated.paymentToLmRef = undefined; updated.ladlyStatus = 'Pending'; }
+                  return updated;
+                }
+                return t;
+              });
+              diskSave('transactions', next);
+              return next;
+            });
+            const bIds = matchedRefs.split(', ').filter(Boolean);
+            setBankTransactions(prev => {
+              const next = prev.map(bt => bIds.includes(bt.id) ? { ...bt, matchedTransactionId: undefined } : bt);
+              diskSave('bankTransactions', next);
+              return next;
+            });
+          }} 
+        />
       )}
+      {activeTab === 'banking' && (
+        <BankingComponent 
+          bankTransactions={bankTransactions} 
+          transactions={transactions} 
+          onUpdateBankTransaction={(bt) => { 
+            setBankTransactions(prev => {
+              const next = prev.map(i => i.id === bt.id ? bt : i);
+              diskSave('bankTransactions', next);
+              return next;
+            });
+          }} 
+          onUpdateTransaction={handleUpdateTransaction} 
+          onClearBankTransactions={() => { 
+            setBankTransactions([]); 
+            diskSave('bankTransactions', []);
+          }} 
+          onAddExpenseFromBank={handleAddExpenseFromBank}
+          onLinkBankToLedger={handleLinkBankToLedger}
+          onUnlinkBank={(bankId) => {
+             let tId: string | undefined;
+             setBankTransactions(prev => {
+               const bankTx = prev.find(b => b.id === bankId);
+               tId = bankTx?.matchedTransactionId;
+               const next = prev.map(b => b.id === bankId ? { ...b, matchedTransactionId: undefined } : b);
+               diskSave('bankTransactions', next);
+               return next;
+             });
+             if (tId) {
+               const tIds = tId.split(', ').filter(Boolean);
+               setTransactions(prev => {
+                 const next = prev.map(t => {
+                   if (tIds.includes(t.id)) {
+                     const updated = { ...t };
+                     const cleanRef = (str?: string) => { if (!str) return undefined; const ids = str.split(', ').filter(id => id !== bankId); return ids.length > 0 ? ids.join(', ') : undefined; };
+                     updated.referenceNumber = cleanRef(updated.referenceNumber);
+                     updated.paymentToLmRef = cleanRef(updated.paymentToLmRef);
+                     if (!updated.referenceNumber) updated.clientStatus = 'Pending';
+                     if (!updated.paymentToLmRef) updated.ladlyStatus = 'Pending';
+                     return updated;
+                   }
+                   return t;
+                 });
+                 diskSave('transactions', next);
+                 return next;
+               });
+             }
+          }}
+          onStatementUpload={handleStatementUpload} 
+          isProcessing={isProcessingBanking} progress={bankingProgress} statusMsg={bankingStatus} showAedEquivalent={showAedEquivalent} 
+        />
+      )}
+      {activeTab === 'tax' && <VatCenter transactions={transactions} showAedEquivalent={showAedEquivalent} dismissedTips={dismissedTips} onDismissTip={(id) => setDismissedTips(p => [...p, id])} onOpenAi={() => setIsAiOpen(true)} />}
+      {activeTab === 'campaigns' && (
+        <CampaignTracker 
+          transactions={transactions} 
+          campaigns={autoDiscoveredCampaigns} 
+          rateCard={parsedRateCardData} 
+          onUpdateCampaign={(n, m) => { 
+            setCampaignMetadata(prev => {
+              const next: Record<string, Campaign> = { ...prev, [n]: { projectName: n, ...(prev[n] || {}), ...m } as Campaign }; 
+              diskSave('campaignMetadata', next); 
+              return next;
+            });
+          }} 
+          onMergeCampaigns={(s, t) => { 
+            setTransactions(prev => {
+              const next = prev.map(tr => s.includes(tr.project) ? {...tr, project: t, mergedFrom: tr.project !== t ? tr.project : tr.mergedFrom} : tr);
+              diskSave('transactions', next);
+              return next;
+            });
+          }} 
+          onAddCampaign={(n) => { 
+            setCampaignMetadata(prev => { const next = {...prev, [n]: {projectName: n}}; diskSave('campaignMetadata', next); return next; });
+          }} 
+          onRenameCampaign={(o, n) => { 
+            setTransactions(prev => {
+              const next = prev.map(t => t.project === o ? {...t, project: n} : t);
+              diskSave('transactions', next);
+              return next;
+            });
+            setCampaignMetadata(prev => {
+              const nextM = {...prev}; 
+              if (nextM[o]) { nextM[n] = {...nextM[o], projectName: n}; delete nextM[o]; } 
+              diskSave('campaignMetadata', nextM); 
+              return nextM;
+            });
+          }} 
+          selectedProjectName={selectedProjectName} 
+          setSelectedProjectName={setSelectedProjectName} 
+          showAedEquivalent={showAedEquivalent} 
+        />
+      )}
+      {activeTab === 'crm' && <CRM contacts={contacts} onAddContact={(c) => { setContacts(prev => { const next = [c, ...prev]; diskSave('contacts', next); return next; }); }} onDeleteContact={(id) => { setContacts(prev => { const next = prev.filter(c => c.id !== id); diskSave('contacts', next); return next; }); }} onUpdateStatus={(id, s) => { setContacts(prev => { const next = prev.map(c => c.id === id ? {...c, status: s} : c); diskSave('contacts', next); return next; }); }} dismissedTips={dismissedTips} onDismissTip={(id) => setDismissedTips(p => [...p, id])} />}
+      {activeTab === 'resources' && <Resources resources={resources} rateCardData={parsedRateCardData} onUpdateResources={(u) => { setResources(prev => { const next = {...prev, ...u}; diskSave('resources', next); return next; }); }} onUpdateRateCardData={(d) => { setParsedRateCardData(d); diskSave('parsedRateCard', d); }} />}
+
+      <Settings 
+        isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} 
+        config={zohoConfig} onSaveConfig={(c) => { setZohoConfig(c); diskSave('zohoConfig', c); }} 
+        onSync={handleZohoSync} isSyncing={isSyncingZoho} 
+        onClearData={() => { 
+            localStorage.clear(); 
+            sessionStorage.clear();
+            window.location.href = window.location.origin; 
+        }} 
+        onExport={() => {
+          const exportData = {
+            version: STORAGE_VERSION,
+            timestamp: new Date().toISOString(),
+            entityId: currentEntityId,
+            entities,
+            data: { transactions, contacts, campaignMetadata, bankTransactions, resources, parsedRateCardData, chatHistory, zohoConfig },
+            ui: { theme, isDarkMode, fontSize, showAedEquivalent, columnWidths, columnLabels, dismissedTips }
+          };
+          const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `bookeeper_backup_${new Date().toISOString().split('T')[0]}.json`;
+          link.click();
+          URL.revokeObjectURL(url);
+        }} 
+        onImport={(file) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            try {
+              const backup = JSON.parse(e.target?.result as string);
+              if (backup.data) {
+                const { data, ui, entities: impEntities } = backup;
+                if (data.transactions) updateTransactions(data.transactions);
+                if (data.bankTransactions) updateBankTransactions(data.bankTransactions);
+                if (data.contacts) { setContacts(data.contacts); diskSave('contacts', data.contacts); }
+                if (data.campaignMetadata) { setCampaignMetadata(data.campaignMetadata); diskSave('campaignMetadata', data.campaignMetadata); }
+                if (data.resources) { setResources(data.resources); diskSave('resources', data.resources); }
+                if (data.parsedRateCardData) { setParsedRateCardData(data.parsedRateCardData); diskSave('parsedRateCard', data.parsedRateCardData); }
+                if (data.chatHistory) { setChatHistory(data.chatHistory); diskSave('chatHistory', data.chatHistory); }
+                if (data.zohoConfig) { setZohoConfig(data.zohoConfig); diskSave('zohoConfig', data.zohoConfig); }
+                if (impEntities) { setEntities(impEntities); localStorage.setItem('app_entities', JSON.stringify(impEntities)); }
+                if (ui) {
+                  setTheme(ui.theme || 'teal');
+                  setIsDarkMode(!!ui.isDarkMode);
+                  setFontSize(ui.fontSize || '14');
+                  setShowAedEquivalent(ui.showAedEquivalent !== false);
+                  setColumnWidths(ui.columnWidths || {});
+                  setColumnLabels(ui.columnLabels || {});
+                  setDismissedTips(ui.dismissedTips || []);
+                }
+                alert("Global system restore successful.");
+              }
+            } catch (err) { alert("Import failed: Corrupted or invalid backup file."); }
+          };
+          reader.readAsText(file);
+        }} 
+        theme={theme} onSetTheme={setTheme} isDarkMode={isDarkMode} onSetDarkMode={setIsDarkMode} fontSize={fontSize} onSetFontSize={setFontSize} showAedEquivalent={showAedEquivalent} onSetShowAedEquivalent={setShowAedEquivalent} 
+      />
+
+      <AIChat 
+        isOpen={isAiOpen} onClose={() => setIsAiOpen(false)} 
+        transactions={transactions} contacts={contacts} campaigns={autoDiscoveredCampaigns} bankTransactions={bankTransactions} 
+        history={chatHistory} onUpdateHistory={(h) => { setChatHistory(h); diskSave('chatHistory', h); }} 
+        onNavigateToCampaign={() => { setActiveTab('campaigns'); setIsAiOpen(false); }} 
+        onUpdateLedgerStatus={(ids, field, status) => { 
+            setTransactions(prev => {
+              const next = prev.map(t => ids.includes(t.project) ? {...t, [field]: status} : t);
+              diskSave('transactions', next);
+              return next;
+            });
+        }} 
+        onReconcile={(pName, bId) => {
+           const ledgerItem = transactions.find(t => t.project === pName);
+           if (ledgerItem) {
+             handleLinkBankToLedger(bId, ledgerItem.id);
+           }
+        }} 
+      />
     </Layout>
   );
 };

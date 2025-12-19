@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Heart, DollarSign } from 'lucide-react';
+import { Heart, DollarSign, TrendingUp, Calculator } from 'lucide-react';
 import DirhamSymbol from './DirhamSymbol';
 
 interface AppLogoProps {
@@ -14,65 +14,64 @@ const AppLogo: React.FC<AppLogoProps> = ({ className = "h-10 w-10", size }) => {
       className={`relative flex items-center justify-center shrink-0 ${className}`} 
       style={{ width: size, height: size }}
     >
-      {/* Main Stylized "B" Logo from reference image - Hardcoded White for visibility */}
+      {/* Main Stylized "BK" Accounting Logo */}
       <div className="relative z-10 w-full h-full">
         <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full drop-shadow-md">
-          {/* The Outer Folder/Document Shape */}
+          {/* Ledger Book Background Shape */}
           <path 
-            d="M30 30V80H70V45C70 45 70 30 60 30H30" 
-            stroke="white" 
-            strokeWidth="8" 
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          {/* The Flap */}
-          <path 
-            d="M45 15H65L75 30" 
-            stroke="white" 
-            strokeWidth="8" 
-            strokeLinecap="round" 
-            strokeLinejoin="round"
-          />
-          {/* The Vertical Stem of the 'B' */}
-          <path 
-            d="M45 15V80" 
-            stroke="white" 
-            strokeWidth="8" 
-            strokeLinecap="round"
-          />
-          {/* Top Curve of 'B' */}
-          <path 
-            d="M45 45H55C60 45 60 52 55 52H45" 
-            stroke="white" 
-            strokeWidth="7" 
-            strokeLinecap="round" 
-            strokeLinejoin="round"
-          />
-          {/* Bottom Curve of 'B' */}
-          <path 
-            d="M45 62H58C63 62 63 70 58 70H45" 
-            stroke="white" 
-            strokeWidth="7" 
-            strokeLinecap="round" 
-            strokeLinejoin="round"
+            d="M25 20C25 17.2386 27.2386 15 30 15H75C77.7614 15 80 17.2386 80 20V80C80 82.7614 77.7614 85 75 85H30C27.2386 85 25 82.7614 25 80V20Z" 
+            fill="currentColor" 
+            fillOpacity="0.1"
           />
           
-          {/* The Red Heart from the image */}
+          {/* Document / Spine Outline */}
           <path 
-            d="M75 25C75 25 73 20 69 20C65 20 63 23 63 25C63 29 75 35 75 35C75 35 87 29 87 25C87 23 85 20 81 20C77 20 75 25 75 25Z" 
-            fill="#EF4444" 
+            d="M35 15V85M25 20H75C77.7614 20 80 22.2386 80 25V75C80 77.7614 77.7614 80 75 80H25V20Z" 
             stroke="white" 
-            strokeWidth="2.5"
+            strokeWidth="6" 
+            strokeLinecap="round" 
+            strokeLinejoin="round" 
           />
+
+          {/* Stylized 'B' */}
+          <path 
+            d="M45 35H55C58.3137 35 61 37.6863 61 41C61 44.3137 58.3137 47 55 47H45V35Z" 
+            stroke="white" 
+            strokeWidth="5" 
+            strokeLinecap="round" 
+          />
+          <path 
+            d="M45 47H58C61.3137 47 64 49.6863 64 53C64 56.3137 61.3137 59 58 59H45V47Z" 
+            stroke="white" 
+            strokeWidth="5" 
+            strokeLinecap="round" 
+          />
+          <path d="M45 35V59" stroke="white" strokeWidth="5" strokeLinecap="round" />
+
+          {/* Stylized 'K' (sharing the B's spine logic or adjacent) */}
+          <path d="M70 35V59" stroke="white" strokeWidth="5" strokeLinecap="round" />
+          <path d="M70 47L80 35" stroke="white" strokeWidth="5" strokeLinecap="round" />
+          <path d="M70 47L80 59" stroke="white" strokeWidth="5" strokeLinecap="round" />
+
+          {/* Accounting Ledger Lines / Calculator Grid Motif at bottom */}
+          <rect x="45" y="68" width="8" height="3" rx="1" fill="white" />
+          <rect x="58" y="68" width="8" height="3" rx="1" fill="white" />
+          <rect x="71" y="68" width="8" height="3" rx="1" fill="white" />
+          
+          {/* Decorative Success Checkmark (Accounting Verified) */}
+          <circle cx="20" cy="20" r="10" fill="#10B981" />
+          <path d="M16 20L19 23L24 18" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </div>
 
-      {/* Orbiting Elements Container */}
+      {/* Orbiting Elements Container - Reinforcing the Smart/AI theme */}
       <div className="absolute inset-[-60%] orbit-container pointer-events-none select-none">
         
-        {/* Revolving Heart 1 */}
+        {/* Revolving Calculator Icon */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 orbit-item">
-           <Heart size={14} className="fill-rose-500 text-rose-500 animate-pulse-soft" />
+           <div className="bg-primary text-white rounded-lg p-1.5 shadow-lg ring-2 ring-white/20">
+             <Calculator size={12} strokeWidth={3} />
+           </div>
         </div>
 
         {/* Revolving Dollar Sign */}
@@ -89,9 +88,11 @@ const AppLogo: React.FC<AppLogoProps> = ({ className = "h-10 w-10", size }) => {
            </div>
         </div>
 
-        {/* Revolving Heart 2 */}
+        {/* Revolving Trending Up Arrow */}
         <div className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 orbit-item" style={{ animationDelay: '-11.25s' }}>
-           <Heart size={12} className="fill-rose-400 text-rose-400 animate-float" />
+           <div className="bg-rose-500 text-white rounded-full p-1.5 shadow-lg ring-2 ring-white/20">
+             <TrendingUp size={12} strokeWidth={3} />
+           </div>
         </div>
 
       </div>

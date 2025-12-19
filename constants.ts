@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { Transaction, Contact, TransactionType, Category, LeadStatus, Campaign } from './types';
+import { Transaction, Contact, Category, LeadStatus, Campaign } from './types';
 import DirhamSymbol from './components/DirhamSymbol';
 import { CONFIG } from './config';
 
@@ -26,26 +25,40 @@ export const RATE_CARD_SERVICES = [
 
 /**
  * Safely formats a date for display.
- * Handles string formats (YYYY-MM-DD) and native Date objects.
+ * Unifies format to "DD MMM YYYY" (e.g., 25 NOV 2025)
  */
 export const formatDate = (dateVal?: Date | string | null): string => {
   if (!dateVal) return '-';
   
+  let date: Date;
   if (dateVal instanceof Date) {
-    if (isNaN(dateVal.getTime())) return '-';
-    const d = dateVal.getDate().toString().padStart(2, '0');
-    const m = (dateVal.getMonth() + 1).toString().padStart(2, '0');
-    const y = dateVal.getFullYear();
-    return `${d}/${m}/${y}`;
+    date = dateVal;
+  } else {
+    const dateStr = String(dateVal).trim();
+    
+    // Handle YYYY-MM-DD specifically which is common in input[type="date"] and standard ISO
+    if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
+      const parts = dateStr.split('T')[0].split('-');
+      date = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    } 
+    // Handle DD/MM/YYYY or DD-MM-YYYY which is common in bank statements/user input
+    else if (/^\d{2}[/-]\d{2}[/-]\d{4}/.test(dateStr)) {
+      const parts = dateStr.split(/[/-]/);
+      // Assume DD is index 0, MM is 1, YYYY is 2 for professional contexts
+      date = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+    }
+    else {
+      date = new Date(dateStr);
+    }
   }
 
-  const dateStr = String(dateVal);
-  if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-    const [y, m, d] = dateStr.split('-');
-    return `${d}/${m}/${y}`;
-  }
+  if (isNaN(date.getTime())) return String(dateVal);
+
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = date.toLocaleString('en-GB', { month: 'short' }).toUpperCase();
+  const year = date.getFullYear();
   
-  return dateStr;
+  return `${day} ${month} ${year}`;
 };
 
 export const formatCurrency = (amount: number, currency: string = 'AED', showEquivalent: boolean = false): React.ReactNode => {
@@ -74,17 +87,17 @@ export const formatCurrency = (amount: number, currency: string = 'AED', showEqu
     const aedAmount = amount * USD_TO_AED;
     const aedFormatted = aedAmount.toLocaleString(undefined, { 
       minimumFractionDigits: 2, 
-      maximumFractionDigits: 2 
+      maximumFractionDigits: 2
     });
+
     return React.createElement(
-      'div',
-      { className: "flex flex-col items-end leading-tight" },
+      'span',
+      { className: "flex flex-col items-end" },
       base,
       React.createElement(
         'span',
-        { className: "text-[0.65em] text-slate-400 font-bold flex items-center gap-1 opacity-80" },
-        React.createElement(DirhamSymbol, { className: "h-2 w-2" }),
-        aedFormatted
+        { className: "text-[0.7em] text-slate-400 font-bold mt-0.5" },
+        `≈ AED ${aedFormatted}`
       )
     );
   }
