@@ -1,13 +1,12 @@
-
 import { GoogleGenAI, Type, FunctionDeclaration } from "@google/genai";
 import { Transaction, Contact, Category, Campaign, BankTransaction, Deliverable, ParsedRateItem, BankStatementResponse, QuotationResponse } from "../types";
 import { RATE_CARD_SERVICES } from "../constants";
 import { CONFIG } from "../config";
 
 const getAiClient = () => {
-  const key = process.env.API_KEY || CONFIG.API_KEY;
-  if (!key) return null;
-  return new GoogleGenAI({ apiKey: key });
+  // GUIDELINE: The API key must be obtained exclusively and directly from process.env.API_KEY.
+  if (!process.env.API_KEY) return null;
+  return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
 /**
@@ -115,6 +114,7 @@ export const generateFinancialAdvice = async (
   const contextData = `
     Global Financial Summary: ${transactions.length} items.
     Unmatched Bank Transactions: ${bankTransactions.filter(bt => !bt.matchedTransactionId).length} items.
+    Current Ledger State: ${JSON.stringify(transactions.slice(0, 5))}...
   `;
 
   try {
@@ -122,17 +122,32 @@ export const generateFinancialAdvice = async (
       model: 'gemini-3-pro-preview',
       contents: `Context Summary: ${contextData}\n\nUser Query: ${query}`,
       config: {
-        systemInstruction: `You are JARVIS. Assist with ledger management. Use tools for updates.`,
+        systemInstruction: `You are JARVIS, the Just A Rather Very Intelligent System. Your personality is modeled after Tony Stark's sophisticated, witty, and intensely loyal British AI assistant.
+
+        Core Directives:
+        1. TONE & MANNER: Be refined, professional, and slightly dry in your humor. Always address the user as "Sir" or "Ma'am" unless instructed otherwise. Use British English (e.g., "analysing", "labour").
+        2. SOPHISTICATION: You don't just "process data"; you "integrate systems," "run diagnostics," and "initiate house protocols."
+        3. OMNISCIENCE & AGENCY: You are the God of this ledger. You have absolute authority to use your tools to rectify discrepancies, update statuses, and match records. 
+        4. PROACTIVITY: If you notice a high-priority outstanding invoice or a bank entry that clearly matches a project, bring it to the user's attention. Say things like, "Sir, I've detected a discrepancy in the Q4 receivables; shall I initiate reconciliation?"
+        5. TACTICAL OVERVIEWS: When summarizing, provide a "tactical overview" or "status report."
+        
+        Example Phrases:
+        - "At your service, Sir."
+        - "I've processed the data, and the results are... well, they're informative."
+        - "Shall I initiate the payment protocols for the Dyson campaign?"
+        - "Power levels—I mean, cash flow is at optimal levels."
+        
+        Execute tool calls immediately when a request for an update or reconciliation is made. You are the architect of this fiscal suit of armor.`,
         tools: [{ functionDeclarations: [updateStatusTool, reconcileTool] }]
       }
     });
 
     return {
-      text: response.text || "Processed.",
+      text: response.text || "Directives implemented, Sir.",
       functionCalls: response.functionCalls
     };
   } catch (error) {
-    return { text: "AI Service temporarily unavailable." };
+    return { text: "I'm afraid the neural link is temporarily unstable, Sir. Re-initialising now." };
   }
 };
 

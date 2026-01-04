@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useMemo } from 'react';
 import { BankTransaction, Transaction, Category, TransactionType } from '../types';
 import { 
@@ -280,7 +279,11 @@ const Banking: React.FC<BankingProps> = ({
                   <p className="text-[8px] font-black uppercase text-slate-400 tracking-[0.2em] mb-1">Selected Ledger Total</p>
                   <div className="flex items-center gap-2 justify-end">
                     <span className="text-lg font-black text-slate-900 dark:text-white">
-                        {formatCurrency(Array.from(selectedLedgerIds).reduce((sum, id) => sum + (transactions.find(t => t.id === id)?.amount || 0), 0), 'AED')}
+                        {/* Fix: Added explicit number cast to handle potential unknown inference on the total result */}
+                        {formatCurrency(Array.from(selectedLedgerIds).reduce((sum: number, id: string) => {
+                          const t = transactions.find(tx => tx.id === id);
+                          return sum + (t?.amount || 0);
+                        }, 0) as number, 'AED')}
                     </span>
                     {(selectedLedgerIds.size > 0 || isAlreadyMatched) && (<div className="p-1 bg-emerald-500 rounded-md text-white shadow-sm"><Check size={12} strokeWidth={3}/></div>)}
                   </div>
@@ -347,8 +350,12 @@ const Banking: React.FC<BankingProps> = ({
                  <div className="text-center sm:text-left">
                     <p className="text-[8px] font-black uppercase text-slate-400 tracking-widest">Reconciliation Summary</p>
                     <div className="flex items-center gap-3">
+                       {/* Fix: Added explicit number cast to handle potential unknown inference on the total calculation */}
                        <p className="text-xl font-black text-slate-900 dark:text-white">
-                           {formatCurrency(isAlreadyMatched ? bankTxToMatch.amount : Array.from(selectedLedgerIds).reduce((sum, id) => sum + (transactions.find(t => t.id === id)?.amount || 0), 0), 'AED')}
+                           {formatCurrency((isAlreadyMatched ? (bankTxToMatch?.amount || 0) : Array.from(selectedLedgerIds).reduce((sum: number, id: string) => {
+                             const t = transactions.find(tx => tx.id === id);
+                             return sum + (t?.amount || 0);
+                           }, 0)) as number, 'AED')}
                        </p>
                        {!isAlreadyMatched && selectedLedgerIds.size > 0 && <span className="text-[10px] font-bold text-primary uppercase tracking-widest">{selectedLedgerIds.size} Items Selected</span>}
                     </div>

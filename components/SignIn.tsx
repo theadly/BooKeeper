@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Lock, Mail, ArrowRight, Sun, Moon, AlertCircle, Key, ShieldCheck } from 'lucide-react';
+import { Lock, Mail, ArrowRight, Sun, Moon, AlertCircle, Key, ShieldCheck, Zap, Sparkles } from 'lucide-react';
 import AppLogo from './AppLogo';
 import LadlyLogo from './LadlyLogo';
 import { CONFIG } from '../config';
@@ -74,6 +74,14 @@ const SignIn: React.FC<SignInProps> = ({ onSignIn, isDarkMode, onToggleDarkMode 
     }, 1000);
   };
 
+  // Quick Bypass Handler
+  const handleDiveIn = () => {
+    setIsLoading(true);
+    setTimeout(() => {
+        onSignIn();
+    }, 400);
+  };
+
   if (showSetup) {
     return (
         <div className="min-h-screen bg-[#F9F7F2] dark:bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden transition-colors duration-500">
@@ -141,75 +149,89 @@ const SignIn: React.FC<SignInProps> = ({ onSignIn, isDarkMode, onToggleDarkMode 
         {/* Auth Form Container */}
         <div className="bg-white dark:bg-slate-900 p-10 rounded-[3rem] shadow-[0_40px_100px_rgba(0,0,0,0.1)] border border-slate-100 dark:border-slate-800 animate-in zoom-in-95 duration-700">
           <div className="mb-8">
-            <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-1">Welcome back</h2>
-            <p className="text-slate-400 text-sm font-medium">Please enter your credentials to access the workspace.</p>
+            <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-1">Welcome</h2>
+            <p className="text-slate-400 text-sm font-medium">Access your workspace or start fresh.</p>
           </div>
 
-          {error && (
-            <div className="mb-6 p-4 bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800 rounded-2xl flex items-center gap-3 text-rose-600 dark:text-rose-400 animate-in fade-in slide-in-from-top-2">
-              <AlertCircle size={18} />
-              <p className="text-xs font-bold uppercase tracking-tight">{error}</p>
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Work Email</label>
-              <div className="relative group">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-primary transition-colors" size={18} />
-                <input 
-                  type="email" 
-                  required
-                  placeholder="name@company.com"
-                  className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 focus:ring-2 focus:ring-primary font-bold text-sm dark:text-white outline-none"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Password</label>
-              <div className="relative group">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-primary transition-colors" size={18} />
-                <input 
-                  type="password" 
-                  required
-                  placeholder="••••••••"
-                  className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 focus:ring-2 focus:ring-primary font-bold text-sm dark:text-white outline-none"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between pt-2">
-              <label className="flex items-center gap-2 cursor-pointer group">
-                <div className="w-5 h-5 rounded-lg border-2 border-slate-200 dark:border-slate-700 flex items-center justify-center group-hover:border-primary transition-colors">
-                  <div className="w-2.5 h-2.5 bg-primary rounded-sm opacity-0 group-hover:opacity-20" />
-                </div>
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Remember Device</span>
-              </label>
-              <button type="button" className="text-[11px] font-black text-primary uppercase tracking-tight hover:underline">Forgot Access?</button>
-            </div>
-
+          <div className="space-y-4">
+            {/* New Bypass Button */}
             <button 
-              type="submit" 
+              onClick={handleDiveIn}
               disabled={isLoading}
-              className="w-full bg-primary text-primary-foreground py-4.5 rounded-2xl font-black uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70 mt-4"
+              className="w-full bg-slate-900 dark:bg-primary text-white py-5 rounded-[1.8rem] font-black uppercase tracking-[0.2em] shadow-2xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 relative overflow-hidden group mb-2"
             >
+              <div className="absolute inset-0 bg-white/10 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
               {isLoading ? (
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
               ) : (
-                <>Enter Workspace <ArrowRight size={18} /></>
+                <>
+                  <Zap size={20} className="text-amber-400 fill-amber-400" />
+                  Dive Right In
+                  <Sparkles size={16} className="text-indigo-300 animate-pulse" />
+                </>
               )}
             </button>
-          </form>
+
+            <div className="relative py-4 flex items-center gap-4">
+              <div className="h-px bg-slate-100 dark:bg-slate-800 flex-1" />
+              <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Or Sign In</span>
+              <div className="h-px bg-slate-100 dark:bg-slate-800 flex-1" />
+            </div>
+
+            {error && (
+              <div className="mb-6 p-4 bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800 rounded-2xl flex items-center gap-3 text-rose-600 dark:text-rose-400 animate-in fade-in slide-in-from-top-2">
+                <AlertCircle size={18} />
+                <p className="text-xs font-bold uppercase tracking-tight">{error}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4 opacity-60 hover:opacity-100 transition-opacity">
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Work Email</label>
+                <div className="relative group">
+                  <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-primary transition-colors" size={18} />
+                  <input 
+                    type="email" 
+                    placeholder="name@company.com"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 focus:ring-2 focus:ring-primary font-bold text-sm dark:text-white outline-none"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Password</label>
+                <div className="relative group">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-primary transition-colors" size={18} />
+                  <input 
+                    type="password" 
+                    placeholder="••••••••"
+                    className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-12 pr-4 py-4 focus:ring-2 focus:ring-primary font-bold text-sm dark:text-white outline-none"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <button 
+                type="submit" 
+                disabled={isLoading}
+                className="w-full border-2 border-slate-100 dark:border-slate-800 text-slate-400 hover:text-primary hover:border-primary py-4 rounded-2xl font-black uppercase tracking-widest transition-all flex items-center justify-center gap-3 disabled:opacity-70 mt-4"
+              >
+                {isLoading ? (
+                  <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                ) : (
+                  <>Sign In <ArrowRight size={18} /></>
+                )}
+              </button>
+            </form>
+          </div>
           
           {isUsingDefaults() && (
             <div className="mt-8 pt-6 border-t border-slate-50 dark:border-slate-800 text-center">
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-                Initial login: <span className="text-slate-900 dark:text-slate-200">{CONFIG.DEFAULT_USER}</span> / <span className="text-slate-900 dark:text-slate-200">{CONFIG.DEFAULT_PASS}</span>
+                Protected by local encryption.
               </p>
             </div>
           )}

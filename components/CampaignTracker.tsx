@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { Campaign, Transaction, CampaignFile, Deliverable, ParsedRateItem } from '../types';
 import { formatCurrency, formatDate, RATE_CARD_SERVICES } from '../constants';
@@ -6,7 +5,7 @@ import { parseContractForDeliverables } from '../services/geminiService';
 import { 
   ArrowLeft, Clock, FileText, Upload, Trash2, 
   Paperclip, ChevronRight, Plus, X, LayoutGrid, List,
-  PackageCheck, AlertTriangle, Scan, Loader2, Search,
+  PackageCheck, AlertCircle, Scan, Loader2, Search,
   Filter, ArrowUpDown, MoreHorizontal, FolderClosed, Layers, CheckSquare, Square, Edit3, ArrowRight, Folder, ChevronDown, 
   CheckCircle2, Globe, Instagram, Link, Calendar as CalendarIcon, ExternalLink, Calendar
 } from 'lucide-react';
@@ -85,12 +84,12 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
     if (!selectedProjectName) return null;
     const projectTransactions = transactions.filter(t => t.project === selectedProjectName);
     const metadata = campaigns.find(c => c.projectName === selectedProjectName);
-    const totalAmount = projectTransactions.reduce((sum, t) => sum + t.amount, 0);
-    const totalPaid = projectTransactions.reduce((sum, t) => sum + (t.clientPayment || 0), 0);
-    const totalVat = projectTransactions.reduce((sum, t) => sum + (t.vat || 0), 0);
+    const totalAmount = projectTransactions.reduce((sum: number, t: Transaction) => sum + t.amount, 0);
+    const totalPaid = projectTransactions.reduce((sum: number, t: Transaction) => sum + (t.clientPayment || 0), 0);
+    const totalVat = projectTransactions.reduce((sum: number, t: Transaction) => sum + (t.vat || 0), 0);
     
     const campaignDeliverables: Deliverable[] = (metadata?.deliverables || []) as Deliverable[];
-    const deliverablesValue = campaignDeliverables.reduce((sum, d: Deliverable) => sum + (d.rate * d.quantity), 0);
+    const deliverablesValue = campaignDeliverables.reduce((sum: number, d: Deliverable) => sum + (d.rate * d.quantity), 0);
     
     const completedCount = campaignDeliverables.filter((d: Deliverable) => !!d.isCompleted).length;
     const totalCount = campaignDeliverables.length;
@@ -142,7 +141,8 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
     }
     if (selectedFolders.size < 2) return;
     const foldersArray = Array.from(selectedFolders);
-    const targetName = foldersArray.reduce((a, b) => a.length > b.length ? a : b);
+    // Explicitly type reduce parameters to avoid unknown inference
+    const targetName = foldersArray.reduce((a: string, b: string) => a.length > b.length ? a : b);
     onMergeCampaigns(foldersArray, targetName);
     setSelectedFolders(new Set());
     setSelectedProjectName(targetName);
@@ -185,9 +185,10 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
     } finally { setIsScanning(false); }
   }, [campaigns, onUpdateCampaign]);
 
+  // Fix: Explicitly handle unparsed as CampaignFile[] to ensure length property is accessible
   const handleManualScan = () => {
-    const filesList: CampaignFile[] = (selectedCampaignData?.metadata?.files || []) as CampaignFile[];
-    const unparsed = filesList.filter(f => f.isContract && !f.parsed);
+    const filesList = (selectedCampaignData?.metadata?.files || []) as CampaignFile[];
+    const unparsed = filesList.filter((f: CampaignFile) => f.isContract && !f.parsed);
     if (unparsed.length === 0) contractInputRef.current?.click();
     else unparsed.forEach(c => c.base64 && performScan(selectedProjectName!, c.id, c.base64, c.type));
   };
@@ -320,18 +321,18 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
   }, [campaigns, searchQuery, yearFilter, clientFilter, sortBy, transactions]);
 
   // Grouping Campaigns by Year
-  const campaignsByYear = useMemo(() => {
+  const campaignsByYear = useMemo<[string, Campaign[]][]>(() => {
     const grouped: Record<string, Campaign[]> = {};
     filteredCampaigns.forEach(c => {
-      const lines = transactions.filter(t => t.project === c.projectName);
+      const lines: Transaction[] = transactions.filter((t: Transaction) => t.project === c.projectName);
       const year = lines.length > 0 
-        ? Math.max(...lines.map(t => t.year)).toString() 
+        ? Math.max(...lines.map((t: Transaction) => t.year)).toString() 
         : new Date().getFullYear().toString();
       
       if (!grouped[year]) grouped[year] = [];
       grouped[year].push(c);
     });
-    return Object.entries(grouped).sort((a, b) => b[0].localeCompare(a[0]));
+    return Object.entries(grouped).sort((a, b) => b[0].localeCompare(a[0])) as [string, Campaign[]][];
   }, [filteredCampaigns, transactions]);
 
   const handleCardClick = (projectName: string) => {
@@ -447,6 +448,7 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
                              </div>
                            </div>
                          </div></div>
+                         {/* Fix: use item.id instead of id */}
                          <div className="flex items-center gap-1 shrink-0"><button onClick={() => removeDeliverable(item.id)} className="p-2 text-slate-300 dark:text-slate-700 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/10 rounded-xl transition-all"><Trash2 size={16} /></button></div>
                        </div>
                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-slate-50 dark:border-slate-800/50">
@@ -464,7 +466,10 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
 
           <section className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden">
              <div className="px-6 py-4 border-b border-slate-50 dark:border-slate-800 flex items-center justify-between bg-slate-50/20 dark:bg-slate-800/20"><div className="flex items-center gap-2"><Folder size={18} className="text-teal-600" /><h3 className="text-[11px] font-black text-slate-900 dark:text-white uppercase tracking-widest">Consolidated Ledger</h3></div></div>
-             <div className="p-4 sm:p-6 space-y-6">{Object.entries(groupedLines).map(([groupName, lines]) => (<div key={groupName} className="space-y-3"><div className="flex items-center gap-2 mb-2"><span className="text-[8px] sm:text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md tracking-widest">Source: {groupName}</span><div className="h-px bg-slate-50 dark:bg-slate-800 flex-1" /></div><div className="space-y-2">{lines.map(line => (<div key={line.id} className="flex items-center justify-between p-3 sm:p-4 bg-slate-50/30 dark:bg-slate-800/20 rounded-xl border border-slate-100 dark:border-slate-800 hover:border-teal-500/10 transition-all"><div className="flex-1 min-w-0"><p className="font-bold text-slate-900 dark:text-white text-xs truncate">{line.customerName || 'Internal'}</p><p className="text-[9px] text-slate-400 font-bold uppercase tracking-tight mt-0.5">{line.invoiceNumber || 'No Inv'} • {formatDate(line.date)}</p></div><div className="text-right ml-3"><p className="font-black text-slate-900 dark:text-white text-xs">{formatCurrency(line.amount, line.currency, showAedEquivalent)}</p><p className={`text-[8px] font-black uppercase mt-0.5 ${line.clientStatus === 'Paid' ? 'text-emerald-600' : 'text-amber-600'}`}>{line.clientStatus}</p></div></div>))}</div></div>))}</div>
+             <div className="p-4 sm:p-6 space-y-6">
+               {/* Fix: cast Object.entries to provide explicit types for map iteration */}
+               {(Object.entries(groupedLines) as [string, Transaction[]][]).map(([groupName, lines]) => (<div key={groupName} className="space-y-3"><div className="flex items-center gap-2 mb-2"><span className="text-[8px] sm:text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md tracking-widest">Source: {groupName}</span><div className="h-px bg-slate-50 dark:bg-slate-800 flex-1" /></div><div className="space-y-2">{lines.map(line => (<div key={line.id} className="flex items-center justify-between p-3 sm:p-4 bg-slate-50/30 dark:bg-slate-800/20 rounded-xl border border-slate-100 dark:border-slate-800 hover:border-teal-500/10 transition-all"><div className="flex-1 min-w-0"><p className="font-bold text-slate-900 dark:text-white text-xs truncate">{line.customerName || 'Internal'}</p><p className="text-[9px] text-slate-400 font-bold uppercase tracking-tight mt-0.5">{line.invoiceNumber || 'No Inv'} • {formatDate(line.date)}</p></div><div className="text-right ml-3"><p className="font-black text-slate-900 dark:text-white text-xs">{formatCurrency(line.amount, line.currency, showAedEquivalent)}</p><p className={`text-[8px] font-black uppercase mt-0.5 ${line.clientStatus === 'Paid' ? 'text-emerald-600' : 'text-amber-600'}`}>{line.clientStatus}</p></div></div>))}</div></div>))}
+             </div>
           </section>
         </div>
 
@@ -490,51 +495,61 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
 
       <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 pb-32 space-y-8">
         {campaignsByYear.length === 0 ? (
-          <div className="h-48 flex flex-col items-center justify-center text-slate-300 dark:text-slate-700 font-black uppercase text-[9px] tracking-[0.2em] border-2 border-dashed border-slate-100 dark:border-slate-800 rounded-2xl bg-white/30 dark:bg-slate-900/30"><Search size={32} className="mb-3 opacity-5" /><p>No Results Found</p></div>
+          <div className="h-48 flex flex-col items-center justify-center text-slate-300 dark:text-slate-700 font-black uppercase text-[9px] tracking-[0.2em] border-2 border-dashed border-slate-100 dark:border-slate-800 bg-white/30 dark:bg-slate-900/30"><Search size={32} className="mb-3 opacity-5" /><p>No Results Found</p></div>
         ) : (
-          campaignsByYear.map(([year, yearlyCampaigns]) => (
-            <div key={year} className="space-y-4">
-              <div className="flex items-center gap-3 sticky top-0 bg-bg-page dark:bg-slate-950 z-20 py-2"><span className="text-lg font-black text-slate-900 dark:text-white">{year}</span><div className="h-px bg-slate-200 dark:bg-slate-800 flex-1" /><span className="text-[8px] font-black uppercase text-slate-400 tracking-widest bg-white dark:bg-slate-900 px-2 py-1 rounded border border-slate-100 dark:border-slate-800">{yearlyCampaigns.length} Campaign{yearlyCampaigns.length !== 1 ? 's' : ''}</span></div>
-              <div className={`grid gap-3 ${viewType === 'grid' ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6' : 'grid-cols-1'}`}>
-                {yearlyCampaigns.map((campaign: Campaign) => {
-                  const lines: Transaction[] = transactions.filter(t => t.project === campaign.projectName);
-                  const total = lines.reduce((sum, t) => sum + t.amount, 0);
-                  const isSelected = selectedFolders.has(campaign.projectName);
-                  const clientName = lines.length > 0 ? (lines[0] as Transaction).customerName : '-';
-                  
-                  if (viewType === 'grid') {
+          campaignsByYear.map(([year, campaignsList]: [string, Campaign[]]) => {
+            // Fix: Explicitly handle the campaign list as typed array to avoid unknown inference
+            const yearlyCampaigns = campaignsList;
+            return (
+              <div key={year} className="space-y-4">
+                <div className="flex items-center gap-3 sticky top-0 bg-bg-page dark:bg-slate-950 z-20 py-2">
+                  <span className="text-lg font-black text-slate-900 dark:text-white">{year}</span>
+                  <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1" />
+                  <span className="text-[8px] font-black uppercase text-slate-400 tracking-widest bg-white dark:bg-slate-900 px-2 py-1 rounded border border-slate-100 dark:border-slate-800">
+                    {yearlyCampaigns.length} Campaign{yearlyCampaigns.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className={`grid gap-3 ${viewType === 'grid' ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6' : 'grid-cols-1'}`}>
+                  {yearlyCampaigns.map((campaign: Campaign) => {
+                    const lines: Transaction[] = transactions.filter(t => t.project === campaign.projectName);
+                    const total = lines.reduce((sum, t) => sum + t.amount, 0);
+                    const isSelected = selectedFolders.has(campaign.projectName);
+                    const clientName = lines.length > 0 ? (lines[0] as Transaction).customerName : '-';
+                    
+                    if (viewType === 'grid') {
+                      return (
+                        <div 
+                          key={campaign.projectName} 
+                          onClick={() => handleCardClick(campaign.projectName)} 
+                          className={`group bg-white dark:bg-slate-900 border rounded-2xl shadow-sm overflow-hidden flex flex-col transition-all duration-300 cursor-pointer relative ${isSelected ? 'border-primary ring-2 ring-primary/20 scale-[0.97]' : 'border-slate-100 dark:border-slate-800 hover:shadow-lg hover:-translate-y-0.5'}`}
+                        >
+                          <div className="p-3.5 flex-1 relative">
+                            <button onClick={(e) => toggleFolderSelection(campaign.projectName, e)} className={`absolute top-2.5 right-2.5 p-1 rounded-md transition-all ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-slate-50 dark:bg-slate-800 text-slate-200 dark:text-slate-600 hover:text-primary'}`}>{isSelected ? <CheckSquare size={12} /> : <Square size={12} />}</button>
+                            <div className="mb-2.5"><BrandAvatar name={campaign.projectName} size="md" /></div>
+                            <h3 className="text-[11px] font-black text-slate-900 dark:text-white mb-0.5 tracking-tight group-hover:text-primary transition-colors truncate pr-6">{campaign.projectName}</h3>
+                            <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 mb-2 uppercase tracking-tight">{clientName}</p>
+                            <div className="flex wrap gap-1 mb-2.5"><span className="text-[7px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest bg-slate-50 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-100 dark:border-slate-800">{lines.length} Line{lines.length !== 1 ? 's' : ''}</span></div>
+                            <div className="text-[8px] font-bold text-slate-400 dark:text-slate-500 flex items-center gap-1"><Clock size={10} /> {lines.length > 0 ? formatDate(lines[0]?.date) : 'Recently Created'}</div>
+                          </div>
+                          <div className="px-3.5 py-2.5 bg-slate-50/40 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between"><div className="text-[10px] font-black text-slate-900 dark:text-white">{formatCurrency(total, 'AED', showAedEquivalent)}</div><div className="text-7px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-1">Open <ArrowRight size={8}/></div></div>
+                        </div>
+                      );
+                    }
                     return (
                       <div 
                         key={campaign.projectName} 
                         onClick={() => handleCardClick(campaign.projectName)} 
-                        className={`group bg-white dark:bg-slate-900 border rounded-2xl shadow-sm overflow-hidden flex flex-col transition-all duration-300 cursor-pointer relative ${isSelected ? 'border-primary ring-2 ring-primary/20 scale-[0.97]' : 'border-slate-100 dark:border-slate-800 hover:shadow-lg hover:-translate-y-0.5'}`}
+                        className={`p-3 rounded-xl border shadow-sm flex items-center justify-between gap-3 transition-all cursor-pointer group ${isSelected ? 'bg-primary/5 border-primary' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-primary/20'}`}
                       >
-                        <div className="p-3.5 flex-1 relative">
-                          <button onClick={(e) => toggleFolderSelection(campaign.projectName, e)} className={`absolute top-2.5 right-2.5 p-1 rounded-md transition-all ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-slate-50 dark:bg-slate-800 text-slate-200 dark:text-slate-600 hover:text-primary'}`}>{isSelected ? <CheckSquare size={12} /> : <Square size={12} />}</button>
-                          <div className="mb-2.5"><BrandAvatar name={campaign.projectName} size="md" /></div>
-                          <h3 className="text-[11px] font-black text-slate-900 dark:text-white mb-0.5 tracking-tight group-hover:text-primary transition-colors truncate pr-6">{campaign.projectName}</h3>
-                          <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 mb-2 uppercase tracking-tight">{clientName}</p>
-                          <div className="flex wrap gap-1 mb-2.5"><span className="text-[7px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest bg-slate-50 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-100 dark:border-slate-700">{lines.length} Line{lines.length !== 1 ? 's' : ''}</span></div>
-                          <div className="text-[8px] font-bold text-slate-400 dark:text-slate-500 flex items-center gap-1"><Clock size={10} /> {lines.length > 0 ? formatDate(lines[0]?.date) : 'Recently Created'}</div>
-                        </div>
-                        <div className="px-3.5 py-2.5 bg-slate-50/40 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between"><div className="text-[10px] font-black text-slate-900 dark:text-white">{formatCurrency(total, 'AED', showAedEquivalent)}</div><div className="text-[7px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-1">Open <ArrowRight size={8}/></div></div>
+                        <div className="flex items-center gap-3 flex-1 min-w-0"><button onClick={(e) => toggleFolderSelection(campaign.projectName, e)} className={`p-1 rounded-md transition-all shrink-0 ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-slate-50 dark:bg-slate-800 text-slate-200 dark:text-slate-700 hover:text-primary'}`}>{isSelected ? <CheckSquare size={12} /> : <Square size={12} />}</button><BrandAvatar name={campaign.projectName} size="xs" /><div className="flex-1 min-w-0"><h4 className="font-black text-slate-900 dark:text-white text-[11px] tracking-tight group-hover:text-primary truncate">{campaign.projectName}</h4><p className="text-[8px] font-bold text-slate-400 uppercase tracking-tight truncate">{clientName}</p></div></div>
+                        <div className="flex items-center gap-4"><div className="text-right hidden xs:block"><p className="font-black text-slate-900 dark:text-white text-[11px]">{formatCurrency(total, 'AED', showAedEquivalent)}</p><p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">{lines.length} Lines</p></div><ChevronRight size={14} className="text-slate-300 dark:text-slate-700 group-hover:text-primary group-hover:translate-x-0.5 transition-all" /></div>
                       </div>
                     );
-                  }
-                  return (
-                    <div 
-                      key={campaign.projectName} 
-                      onClick={() => handleCardClick(campaign.projectName)} 
-                      className={`p-3 rounded-xl border shadow-sm flex items-center justify-between gap-3 transition-all cursor-pointer group ${isSelected ? 'bg-primary/5 border-primary' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:border-primary/20'}`}
-                    >
-                      <div className="flex items-center gap-3 flex-1 min-w-0"><button onClick={(e) => toggleFolderSelection(campaign.projectName, e)} className={`p-1 rounded-md transition-all shrink-0 ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-slate-50 dark:bg-slate-800 text-slate-200 dark:text-slate-700 hover:text-primary'}`}>{isSelected ? <CheckSquare size={12} /> : <Square size={12} />}</button><BrandAvatar name={campaign.projectName} size="xs" /><div className="flex-1 min-w-0"><h4 className="font-black text-slate-900 dark:text-white text-[11px] tracking-tight group-hover:text-primary truncate">{campaign.projectName}</h4><p className="text-[8px] font-bold text-slate-400 uppercase tracking-tight truncate">{clientName}</p></div></div>
-                      <div className="flex items-center gap-4"><div className="text-right hidden xs:block"><p className="font-black text-slate-900 dark:text-white text-[11px]">{formatCurrency(total, 'AED', showAedEquivalent)}</p><p className="text-[8px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-tight">{lines.length} Lines</p></div><ChevronRight size={14} className="text-slate-300 dark:text-slate-700 group-hover:text-primary group-hover:translate-x-0.5 transition-all" /></div>
-                    </div>
-                  );
-                })}
+                  })}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
 

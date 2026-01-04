@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { AIChatMessage, Transaction, Contact, Campaign, BankTransaction, StatusOption } from '../types';
 import { generateFinancialAdvice } from '../services/geminiService';
 import { Send, User, Sparkles, Trash2, ExternalLink, X, Minus, CheckCircle, Activity } from 'lucide-react';
-import FiNancyIcon from './FiNancyIcon';
+import JarvisIcon from './JarvisIcon';
 import LadlyLogo from './LadlyLogo';
 
 interface AIChatProps {
@@ -43,7 +43,7 @@ const AIChat: React.FC<AIChatProps> = ({
       onUpdateHistory([{
         id: 'welcome',
         role: 'model',
-        text: "Hello! I'm JARVIS. I can provide insights or take actions on your ledger. Just ask!",
+        text: "At your service, Sir. All systems are online and the ledger is ready for your inspection. How may I assist you today?",
         timestamp: new Date()
       }]);
     }
@@ -130,7 +130,7 @@ const AIChat: React.FC<AIChatProps> = ({
         <div className="p-5 border-b border-gray-100 dark:border-slate-700 bg-sidebar text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="bg-white/10 p-2 rounded-xl text-indigo-400">
-                <FiNancyIcon className="h-6 w-6" />
+                <JarvisIcon className="h-6 w-6" />
             </div>
             <div>
                 <h2 className="font-black text-sm uppercase tracking-widest">JARVIS AI</h2>
@@ -154,7 +154,7 @@ const AIChat: React.FC<AIChatProps> = ({
                 w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm
                 ${msg.role === 'model' ? 'bg-primary text-primary-foreground' : 'bg-bg-card border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'}
               `}>
-                {msg.role === 'model' ? <FiNancyIcon className="h-6 w-6" /> : <User size={16} />}
+                {msg.role === 'model' ? <JarvisIcon className="h-6 w-6" /> : <User size={16} />}
               </div>
               
               <div className={`
@@ -175,7 +175,7 @@ const AIChat: React.FC<AIChatProps> = ({
           {isLoading && (
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
-                <FiNancyIcon className="h-6 w-6" />
+                <JarvisIcon className="h-6 w-6" />
               </div>
               <div className="bg-white dark:bg-slate-800 px-4 py-2 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-center gap-2">
                  <Activity size={12} className="text-primary animate-pulse" />

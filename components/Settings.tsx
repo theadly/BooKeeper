@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ZohoConfig } from '../types';
 import { 
   Save, RefreshCw, CheckCircle, Trash2, Download, 
-  UploadCloud, Palette, Moon, Sun, X, AlertTriangle, ShieldCheck, Database, Lock, Mail, Key, Eye, EyeOff, Globe
+  UploadCloud, Palette, Moon, Sun, X, AlertTriangle, ShieldCheck, Database, Lock, Mail, Key, Eye, EyeOff, Globe, Type
 } from 'lucide-react';
 import { CONFIG } from '../config';
 
@@ -109,18 +109,36 @@ const Settings: React.FC<SettingsProps> = ({
                          ))}
                       </div>
                    </div>
-                   <div className="grid grid-cols-2 gap-6">
+                   
+                   <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">System Scaling</label>
+                        <span className="text-[10px] font-black text-primary px-2 py-0.5 bg-primary/10 rounded-md">{fontSize}px</span>
+                      </div>
+                      <input 
+                        type="range" min="10" max="20" step="1" 
+                        className="w-full h-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-primary"
+                        value={fontSize} 
+                        onChange={(e) => onSetFontSize(e.target.value)}
+                      />
+                      <div className="flex justify-between px-1">
+                        <span className="text-[8px] font-bold text-slate-400 uppercase">Compact</span>
+                        <span className="text-[8px] font-bold text-slate-400 uppercase">Standard</span>
+                        <span className="text-[8px] font-bold text-slate-400 uppercase">Comfort</span>
+                      </div>
+                   </div>
+
+                   <div className="grid grid-cols-2 gap-6 pt-2">
                       <div className="space-y-3">
                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Appearance</label>
                          <div className="flex bg-slate-100 dark:bg-slate-900 p-1 rounded-xl">
                             <button onClick={() => onSetDarkMode(false)} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${!isDarkMode ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}><Sun size={14} /> Light</button>
-                            {/* Fixed typo setOnSetDarkMode to onSetDarkMode */}
                             <button onClick={() => onSetDarkMode(true)} className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${isDarkMode ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400'}`}><Moon size={14} /> Dark</button>
                          </div>
                       </div>
                       <div className="space-y-3">
                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest">Financial Display</label>
-                         <button onClick={() => onSetShowAedEquivalent(!showAedEquivalent)} className={`w-full flex items-center justify-center gap-2 py-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${showAedEquivalent ? 'bg-primary text-white border-primary shadow-lg' : 'bg-white dark:bg-slate-800 border-slate-200 text-slate-400'}`}>AED Equivalent</button>
+                         <button onClick={() => onSetShowAedEquivalent(!showAedEquivalent)} className={`w-full h-10 flex items-center justify-center gap-2 rounded-xl border text-[10px] font-black uppercase tracking-widest transition-all ${showAedEquivalent ? 'bg-primary text-white border-primary shadow-lg' : 'bg-white dark:bg-slate-800 border-slate-200 text-slate-400'}`}>AED Equivalent</button>
                       </div>
                    </div>
                 </div>

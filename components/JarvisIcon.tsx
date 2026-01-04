@@ -1,12 +1,12 @@
 
 import React from 'react';
 
-interface FiNancyIconProps {
+interface JarvisIconProps {
   className?: string;
   size?: number | string;
 }
 
-const FiNancyIcon: React.FC<FiNancyIconProps> = ({ className = "h-8 w-8", size }) => {
+const JarvisIcon: React.FC<JarvisIconProps> = ({ className = "h-8 w-8", size }) => {
   return (
     <svg 
       viewBox="0 0 100 100" 
@@ -16,7 +16,6 @@ const FiNancyIcon: React.FC<FiNancyIconProps> = ({ className = "h-8 w-8", size }
       xmlns="http://www.w3.org/2000/svg"
     >
       {/* God-Level Robot Head Design */}
-      {/* Outer Glow / Halo Effect */}
       <circle cx="50" cy="50" r="45" fill="currentColor" fillOpacity="0.05" />
       
       {/* Main Cranium */}
@@ -68,4 +67,4 @@ const FiNancyIcon: React.FC<FiNancyIconProps> = ({ className = "h-8 w-8", size }
   );
 };
 
-export default FiNancyIcon;
+export default JarvisIcon;
