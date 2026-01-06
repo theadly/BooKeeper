@@ -15,51 +15,40 @@ import {
   TransactionType, Category, AIChatMessage, StatusOption,
   ZohoConfig, Entity, ParsedRateItem
 } from './types';
-import { INITIAL_TRANSACTIONS, INITIAL_CONTACTS, RATE_CARD_SERVICES } from './constants';
+import { INITIAL_TRANSACTIONS, RATE_CARD_SERVICES } from './constants';
 import { parseBankStatement } from './services/geminiService';
 import { fetchZohoInvoices } from './services/zohoService';
+import { auth, db } from './firebase';
+import { onAuthStateChanged, User, signOut } from 'firebase/auth';
+import { 
+  doc, onSnapshot, setDoc, collection, 
+  query, deleteDoc, writeBatch, updateDoc
+} from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 import { CONFIG } from './config';
 
-const STORAGE_VERSION = '1.2.2';
 const generateId = () => crypto.randomUUID();
 const DEFAULT_ENTITY: Entity = { id: 'e1', name: 'Laila Mourad', initials: 'LM', color: 'bg-primary' };
 
-const getActiveEntityId = () => localStorage.getItem('app_active_entity_id') || 'e1';
-
-const safeLoad = <T,>(key: string, fallback: T): T => {
-  const entityId = getActiveEntityId();
-  const fullKey = `entity_${entityId}_${key}`;
-  const val = localStorage.getItem(fullKey);
-  if (!val) return fallback;
-  try {
-    return JSON.parse(val) as T;
-  } catch (e) {
-    return fallback;
-  }
-};
-
 const App: React.FC = () => {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => localStorage.getItem('app_auth') === 'true');
-  const [currentEntityId] = useState(getActiveEntityId);
-  
-  const [entities, setEntities] = useState<Entity[]>(() => {
-    const saved = localStorage.getItem('app_entities');
-    try { return saved ? JSON.parse(saved) : [DEFAULT_ENTITY]; } catch { return [DEFAULT_ENTITY]; }
-  });
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [entities, setEntities] = useState<Entity[]>([DEFAULT_ENTITY]);
+  const [currentEntityId, setCurrentEntityId] = useState('e1');
 
-  const [transactions, setTransactions] = useState<Transaction[]>(() => safeLoad('transactions', INITIAL_TRANSACTIONS));
+  // --- Core Data State ---
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [history, setHistory] = useState<Transaction[][]>([]);
   const [future, setFuture] = useState<Transaction[][]>([]);
-
-  const [contacts, setContacts] = useState<Contact[]>(() => safeLoad('contacts', INITIAL_CONTACTS));
-  const [campaignMetadata, setCampaignMetadata] = useState<Record<string, Campaign>>(() => safeLoad('campaignMetadata', {}));
-  const [bankTransactions, setBankTransactions] = useState<BankTransaction[]>(() => safeLoad('bankTransactions', []));
-  const [resources, setResources] = useState(() => safeLoad('resources', { mediaKit: null, rateCard: null }));
-  const [parsedRateCardData, setParsedRateCardData] = useState<ParsedRateItem[]>(() => safeLoad('parsedRateCard', RATE_CARD_SERVICES));
-  const [chatHistory, setChatHistory] = useState<AIChatMessage[]>(() => safeLoad('chatHistory', []));
-  const [zohoConfig, setZohoConfig] = useState<ZohoConfig>(() => safeLoad('zohoConfig', { accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' }));
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [campaignMetadata, setCampaignMetadata] = useState<Record<string, Campaign>>({});
+  const [bankTransactions, setBankTransactions] = useState<BankTransaction[]>([]);
+  const [resources, setResources] = useState<{ mediaKit: any; rateCard: any }>({ mediaKit: null, rateCard: null });
+  const [parsedRateCardData, setParsedRateCardData] = useState<ParsedRateItem[]>(RATE_CARD_SERVICES);
+  const [chatHistory, setChatHistory] = useState<AIChatMessage[]>([]);
+  const [zohoConfig, setZohoConfig] = useState<ZohoConfig>({ accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' });
   
+  // UI Preferences (Persisted locally as they are per-device)
   const [activeTab, setActiveTab] = useState('dashboard'); 
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -77,194 +66,166 @@ const App: React.FC = () => {
   const [bankingProgress, setBankingProgress] = useState(0);
   const [bankingStatus, setBankingStatus] = useState('');
 
-  const diskSave = useCallback((subKey: string, data: any) => {
-    const entityId = getActiveEntityId();
-    const fullKey = `entity_${entityId}_${subKey}`;
-    localStorage.setItem(fullKey, JSON.stringify(data));
-    localStorage.setItem('app_storage_version', STORAGE_VERSION);
+  // Authentication Listener
+  useEffect(() => {
+    return onAuthStateChanged(auth, (firebaseUser) => {
+      setUser(firebaseUser);
+      setIsAuthChecking(false);
+    });
   }, []);
 
-  // Centralized State Update Utility to fix Delete/Undo/Redo inconsistencies
-  const updateLedger = useCallback((updater: (prev: Transaction[]) => Transaction[], saveToHistory = true) => {
-    setTransactions(prev => {
-      const next = updater(prev);
-      if (saveToHistory) {
-        setHistory(h => [prev, ...h].slice(0, 50));
-        setFuture([]);
-      }
-      diskSave('transactions', next);
-      return next;
-    });
-  }, [diskSave]);
+  // Firestore Real-time Listeners
+  useEffect(() => {
+    if (!user) return;
 
-  const handleUndo = useCallback(() => {
-    setHistory(prevH => {
-      if (prevH.length === 0) return prevH;
-      const previous = prevH[0];
-      setFuture(f => [transactions, ...f]);
-      setTransactions(previous);
-      diskSave('transactions', previous);
-      return prevH.slice(1);
-    });
-  }, [transactions, diskSave]);
+    // Requested Paths
+    const metadataRef = doc(db, `users/${user.uid}/metadata/global`);
+    const transactionsRef = collection(db, `users/${user.uid}/ledger`);
+    const contactsRef = collection(db, `users/${user.uid}/contacts`);
+    const bankRef = collection(db, `users/${user.uid}/bankTransactions`);
 
-  const handleRedo = useCallback(() => {
-    setFuture(prevF => {
-      if (prevF.length === 0) return prevF;
-      const next = prevF[0];
-      setHistory(h => [transactions, ...h]);
-      setTransactions(next);
-      diskSave('transactions', next);
-      return prevF.slice(1);
-    });
-  }, [transactions, diskSave]);
-
-  const handleAddTransaction = (t: Transaction) => updateLedger(prev => [t, ...prev]);
-  const handleUpdateTransaction = (updated: Transaction) => updateLedger(prev => prev.map(t => t.id === updated.id ? updated : t));
-  const handleDeleteTransaction = (id: string) => updateLedger(prev => prev.filter(t => t.id !== id));
-  const handleBulkDeleteTransactions = (ids: string[]) => updateLedger(prev => prev.filter(t => !ids.includes(t.id)));
-  const handleBulkUpdateTransactions = (ids: string[], updates: Partial<Transaction>) => updateLedger(prev => prev.map(t => ids.includes(t.id) ? { ...t, ...updates } : t));
-
-  const autoDiscoveredCampaigns = useMemo(() => {
-    const list: Record<string, Campaign> = { ...campaignMetadata };
-    transactions.forEach(t => {
-      if (t.project && !list[t.project]) {
-        list[t.project] = { projectName: t.project, files: [], deliverables: [] };
+    const unsubMetadata = onSnapshot(metadataRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.zohoConfig) setZohoConfig(data.zohoConfig);
+        if (data.resources) setResources(data.resources);
+        if (data.parsedRateCard) setParsedRateCardData(data.parsedRateCard);
+        if (data.chatHistory) setChatHistory(data.chatHistory);
+        if (data.campaignMetadata) setCampaignMetadata(data.campaignMetadata);
+        if (data.entities) setEntities(data.entities);
       }
     });
-    return Object.values(list);
-  }, [transactions, campaignMetadata]);
 
-  const handleZohoSync = async () => {
-    if (!zohoConfig.accessToken || !zohoConfig.organizationId) {
-      alert("Please configure Zoho API credentials in Settings first.");
-      return;
-    }
-    setIsSyncingZoho(true);
-    try {
-      const zohoInvoices = await fetchZohoInvoices(zohoConfig);
-      updateLedger(prev => {
-        const next = [...prev];
-        zohoInvoices.forEach(zi => {
-          const idx = next.findIndex(t => (t.zohoInvoiceId === zi.zohoInvoiceId) || (t.invoiceNumber === zi.invoiceNumber));
-          if (idx > -1) next[idx] = { ...next[idx], clientStatus: zi.clientStatus, amount: zi.amount, currency: zi.currency, zohoInvoiceId: zi.zohoInvoiceId };
-          else next.unshift(zi);
-        });
-        return next;
-      });
-      const updatedConfig = { ...zohoConfig, lastSync: new Date().toLocaleString() };
-      setZohoConfig(updatedConfig);
-      diskSave('zohoConfig', updatedConfig);
-    } catch (err) {
-      alert(`Sync Failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    } finally {
-      setIsSyncingZoho(false);
-    }
-  };
+    const unsubTransactions = onSnapshot(query(transactionsRef), (snapshot) => {
+      const docs = snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Transaction));
+      setTransactions(docs.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+    });
 
-  const handleStatementUpload = async (files: File[]) => {
-    setIsProcessingBanking(true);
-    setBankingProgress(0);
-    setBankingStatus('Analyzing Statements...');
-    let allParsed: BankTransaction[] = [];
-    try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        setBankingStatus(`Reading ${file.name}...`);
-        const base64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve((reader.result as string).split(',')[1]);
-          reader.readAsDataURL(file);
-        });
-        const extracted = await parseBankStatement(base64, file.type);
-        allParsed = [...allParsed, ...extracted];
-        setBankingProgress(Math.round(((i + 1) / files.length) * 100));
-      }
-      if (allParsed.length > 0) {
-        setBankTransactions(prev => {
-          const existing = new Set(prev.map(b => `${b.date}_${b.amount}_${b.description.toLowerCase()}`));
-          const filtered = allParsed.filter(b => !existing.has(`${b.date}_${b.amount}_${b.description.toLowerCase()}`));
-          const next = [...filtered, ...prev];
-          diskSave('bankTransactions', next);
-          return next;
-        });
-      }
-    } catch (err) { setBankingStatus('Import error.'); } finally { setTimeout(() => { setIsProcessingBanking(false); setBankingStatus(''); }, 2000); }
-  };
+    const unsubContacts = onSnapshot(query(contactsRef), (snapshot) => {
+      setContacts(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as Contact)));
+    });
 
-  const handleAddExpenseFromBank = useCallback((bankTx: BankTransaction, category: Category) => {
-    const expenseId = generateId();
-    const newExpense: Transaction = {
-        id: expenseId,
-        year: new Date(bankTx.date).getFullYear(),
-        date: bankTx.date,
-        project: bankTx.vendor || bankTx.description,
-        customerName: bankTx.vendor,
-        description: bankTx.description,
-        amount: bankTx.amount,
-        currency: 'AED',
-        category: category,
-        type: TransactionType.EXPENSE,
-        clientStatus: 'Paid',
-        ladlyStatus: 'Paid',
-        paymentToLmRef: bankTx.id
+    const unsubBank = onSnapshot(query(bankRef), (snapshot) => {
+      setBankTransactions(snapshot.docs.map(d => ({ ...d.data(), id: d.id } as BankTransaction)));
+    });
+
+    return () => {
+      unsubMetadata();
+      unsubTransactions();
+      unsubContacts();
+      unsubBank();
     };
-    updateLedger(prev => [newExpense, ...prev]);
-    setBankTransactions(prev => {
-      const next = prev.map(bt => bt.id === bankTx.id ? { ...bt, matchedTransactionId: expenseId, category: category } : bt);
-      diskSave('bankTransactions', next);
-      return next;
-    });
-  }, [updateLedger, diskSave]);
+  }, [user]);
 
-  const handleLinkBankToLedger = useCallback((bankId: string, ledgerIds: string | string[]) => {
-    const targetLedgerIds = Array.isArray(ledgerIds) ? ledgerIds : [ledgerIds];
-    const bankItem = bankTransactions.find(b => b.id === bankId);
-    if (!bankItem) return;
-    const type = bankItem.type === 'credit' ? 'client' : 'laila';
+  // Persistence Helpers
+  const saveMetadata = useCallback(async (updates: any) => {
+    if (!user) return;
+    await setDoc(doc(db, `users/${user.uid}/metadata/global`), updates, { merge: true });
+  }, [user]);
 
-    setBankTransactions(prevBanks => {
-      const nextBanks = prevBanks.map(b => b.id === bankId ? { ...b, matchedTransactionId: targetLedgerIds.join(', ') } : b);
-      diskSave('bankTransactions', nextBanks);
-      return nextBanks;
-    });
+  const handleAddTransaction = async (t: Transaction) => {
+    if (!user) return;
+    setHistory(prev => [transactions, ...prev].slice(0, 50));
+    setFuture([]);
+    await setDoc(doc(db, `users/${user.uid}/ledger/${t.id}`), t);
+  };
 
-    updateLedger(prev => prev.map(t => {
-      if (targetLedgerIds.includes(t.id)) {
-        const updated = { ...t };
-        if (type === 'client') {
-          updated.clientStatus = 'Paid';
-          const existingRefs = updated.referenceNumber ? updated.referenceNumber.split(', ') : [];
-          if (!existingRefs.includes(bankId)) updated.referenceNumber = [...existingRefs, bankId].join(', ');
-        } else {
-          updated.ladlyStatus = 'Paid';
-          const existingRefs = updated.paymentToLmRef ? updated.paymentToLmRef.split(', ') : [];
-          if (!existingRefs.includes(bankId)) updated.paymentToLmRef = [...existingRefs, bankId].join(', ');
-        }
-        return updated;
+  const handleUpdateTransaction = async (updated: Transaction) => {
+    if (!user) return;
+    await setDoc(doc(db, `users/${user.uid}/ledger/${updated.id}`), updated);
+  };
+
+  const handleDeleteTransaction = async (id: string) => {
+    if (!user) return;
+    setHistory(prev => [transactions, ...prev].slice(0, 50));
+    setFuture([]);
+    await deleteDoc(doc(db, `users/${user.uid}/ledger/${id}`));
+  };
+
+  const handleBulkDeleteTransactions = async (ids: string[]) => {
+    if (!user) return;
+    setHistory(prev => [transactions, ...prev].slice(0, 50));
+    setFuture([]);
+    const batch = writeBatch(db);
+    ids.forEach(id => batch.delete(doc(db, `users/${user.uid}/ledger/${id}`)));
+    await batch.commit();
+  };
+
+  const handleBulkUpdateTransactions = async (ids: string[], updates: Partial<Transaction>) => {
+    if (!user) return;
+    const batch = writeBatch(db);
+    ids.forEach(id => batch.update(doc(db, `users/${user.uid}/ledger/${id}`), updates));
+    await batch.commit();
+  };
+
+  const handleUndo = useCallback(async () => {
+    if (history.length === 0 || !user) return;
+    const previousSnapshot = history[0];
+    const currentSnapshot = [...transactions];
+    
+    setFuture(f => [currentSnapshot, ...f]);
+    
+    const batch = writeBatch(db);
+    // Remove currently existing transactions not in previous snapshot
+    currentSnapshot.forEach(t => {
+      if (!previousSnapshot.find(p => p.id === t.id)) {
+        batch.delete(doc(db, `users/${user.uid}/ledger/${t.id}`));
       }
-      return t;
-    }));
-  }, [bankTransactions, updateLedger, diskSave]);
+    });
+    // Restore or update from previous snapshot
+    previousSnapshot.forEach(t => {
+      batch.set(doc(db, `users/${user.uid}/ledger/${t.id}`), t);
+    });
+    
+    await batch.commit();
+    setHistory(h => h.slice(1));
+  }, [history, transactions, user]);
+
+  const handleRedo = useCallback(async () => {
+    if (future.length === 0 || !user) return;
+    const nextSnapshot = future[0];
+    const currentSnapshot = [...transactions];
+
+    setHistory(h => [currentSnapshot, ...h]);
+
+    const batch = writeBatch(db);
+    // Remove currently existing transactions not in next snapshot
+    currentSnapshot.forEach(t => {
+      if (!nextSnapshot.find(n => n.id === t.id)) {
+        batch.delete(doc(db, `users/${user.uid}/ledger/${t.id}`));
+      }
+    });
+    // Restore or update from next snapshot
+    nextSnapshot.forEach(t => {
+      batch.set(doc(db, `users/${user.uid}/ledger/${t.id}`), t);
+    });
+    
+    await batch.commit();
+    setFuture(f => f.slice(1));
+  }, [future, transactions, user]);
 
   const processExcelFile = async (file: File) => {
+    if (!user) return;
     setIsProcessingExcel(true);
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       try {
         if (!evt.target?.result) return;
         const dataArr = new Uint8Array(evt.target.result as ArrayBuffer);
         const wb = XLSX.read(dataArr, { type: 'array', cellDates: true });
         const rawRows = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true });
         if (!rawRows || rawRows.length < 1) return;
+        
         let headerIndex = 0;
         for (let i = 0; i < Math.min(rawRows.length, 15); i++) {
            const rowStr = (rawRows[i] || []).join(' ').toLowerCase();
            if (rowStr.includes('project') || rowStr.includes('invamt') || rowStr.includes('amount') || rowStr.includes('client')) { headerIndex = i; break; }
         }
+        
         const headers = rawRows[headerIndex].map((h: any) => (h || '').toString().toLowerCase().trim());
         const dataRows = rawRows.slice(headerIndex + 1);
         const findIdx = (keywords: string[]) => headers.findIndex((h: string) => h && keywords.some(k => h.includes(k)));
+        
         const idx = {
           year: findIdx(['year']), project: findIdx(['project', 'campaign', 'folder']),
           client: findIdx(['client', 'customer', 'brand']), amount: findIdx(['invamt', 'invoice amt', 'amount', 'total', 'gross']),
@@ -272,6 +233,7 @@ const App: React.FC = () => {
           cStatus: findIdx(['client status', 'cstatus', 'status']), lStatus: findIdx(['ladly status', 'lstatus']),
           pDate: findIdx(['payment date', 'paid date', 'date paid'])
         };
+
         const mapStatus = (val: any): StatusOption => {
           const s = String(val || '').trim().toLowerCase();
           if (s.includes('paid to per')) return 'Paid to personal account';
@@ -282,19 +244,25 @@ const App: React.FC = () => {
           if (s.includes('draft')) return 'Draft';
           return 'Pending';
         };
-        const newItems: Transaction[] = dataRows
-          .filter(r => (idx.project >= 0 && r[idx.project]) || (idx.amount >= 0 && r[idx.amount]))
-          .map(r => {
-            const amount = typeof r[idx.amount] === 'number' ? r[idx.amount] : parseFloat(String(r[idx.amount] || '0').replace(/[^0-9.-]+/g,"")) || 0;
+
+        const batch = writeBatch(db);
+        dataRows.forEach(r => {
+            if (!(idx.project >= 0 && r[idx.project]) && !(idx.amount >= 0 && r[idx.amount])) return;
+            
+            const id = generateId();
+            const rawAmount = r[idx.amount];
+            const amount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount || '0').replace(/[^0-9.-]+/g,"")) || 0;
             const net = amount / (1 + CONFIG.VAT_RATE);
             const vat = amount - net;
             const adlyFee = net * CONFIG.ADLY_FEE_RATE;
             const payableLm = net - adlyFee;
             const transferToLm = payableLm * (1 + CONFIG.VAT_RATE);
-            const dateStr = r[idx.date] instanceof Date ? r[idx.date].toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
+            const rawDate = r[idx.date];
+            const dateStr = rawDate instanceof Date ? rawDate.toISOString().split('T')[0] : new Date().toISOString().split('T')[0];
             const yearVal = idx.year >= 0 && r[idx.year] ? parseInt(String(r[idx.year])) : new Date(dateStr).getFullYear();
-            return {
-              id: generateId(), year: isNaN(yearVal) ? new Date().getFullYear() : yearVal, date: dateStr,
+
+            const item: Transaction = {
+              id, year: isNaN(yearVal) ? new Date().getFullYear() : yearVal, date: dateStr,
               project: String(r[idx.project] || r[idx.client] || 'New Campaign'), customerName: String(r[idx.client] || ''),
               invoiceNumber: idx.inv >= 0 ? String(r[idx.inv] || '') : undefined, amount: Number(amount.toFixed(2)),
               vat: Number(vat.toFixed(2)), net: Number(net.toFixed(2)), fee: Number(adlyFee.toFixed(2)),
@@ -302,14 +270,101 @@ const App: React.FC = () => {
               type: TransactionType.INCOME, currency: 'AED', category: Category.FREELANCE,
               clientStatus: mapStatus(idx.cStatus >= 0 ? r[idx.cStatus] : 'Pending'),
               ladlyStatus: mapStatus(idx.lStatus >= 0 ? r[idx.lStatus] : 'Pending'),
-              clientPaymentDate: idx.pDate >= 0 ? String(r[idx.pDate] || '') : undefined
-            } as Transaction;
-          });
-        if (newItems.length > 0) updateLedger(prev => [...newItems, ...prev]);
+              description: 'Imported via Excel'
+            };
+            batch.set(doc(db, `users/${user.uid}/ledger/${id}`), item);
+        });
+        
+        await batch.commit();
       } catch (err) { console.error("Excel Parsing Error:", err); } finally { setIsProcessingExcel(false); }
     };
     reader.readAsArrayBuffer(file);
   };
+
+  const handleStatementUpload = async (files: File[]) => {
+    if (!user) return;
+    setIsProcessingBanking(true);
+    setBankingProgress(0);
+    setBankingStatus('Analyzing Statements...');
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setBankingStatus(`Reading ${file.name}...`);
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.readAsDataURL(file);
+        });
+        const extracted = await parseBankStatement(base64, file.type);
+        const batch = writeBatch(db);
+        extracted.forEach(bt => {
+            batch.set(doc(db, `users/${user.uid}/bankTransactions/${bt.id}`), bt);
+        });
+        await batch.commit();
+        setBankingProgress(Math.round(((i + 1) / files.length) * 100));
+      }
+    } catch (err) { setBankingStatus('Import error.'); } finally { setTimeout(() => { setIsProcessingBanking(false); setBankingStatus(''); }, 2000); }
+  };
+
+  const handleAddExpenseFromBank = useCallback(async (bankTx: BankTransaction, category: Category) => {
+    if (!user) return;
+    const expenseId = generateId();
+    const newExpense: Transaction = {
+        id: expenseId,
+        year: new Date(bankTx.date).getFullYear(),
+        date: bankTx.date,
+        project: bankTx.vendor || bankTx.description,
+        customerName: bankTx.vendor,
+        description: bankTx.description,
+        amount: bankTx.amount,
+        currency: 'AED' as any,
+        category: category,
+        type: TransactionType.EXPENSE,
+        clientStatus: 'Paid',
+        ladlyStatus: 'Paid',
+        paymentToLmRef: bankTx.id
+    };
+    const batch = writeBatch(db);
+    batch.set(doc(db, `users/${user.uid}/ledger/${expenseId}`), newExpense);
+    batch.update(doc(db, `users/${user.uid}/bankTransactions/${bankTx.id}`), { matchedTransactionId: expenseId, category });
+    await batch.commit();
+  }, [user]);
+
+  const handleLinkBankToLedger = useCallback(async (bankId: string, ledgerIds: string[]) => {
+    if (!user) return;
+    const batch = writeBatch(db);
+    const bankItem = bankTransactions.find(b => b.id === bankId);
+    if (!bankItem) return;
+    
+    const type = bankItem.type === 'credit' ? 'client' : 'laila';
+    batch.update(doc(db, `users/${user.uid}/bankTransactions/${bankId}`), { matchedTransactionId: ledgerIds.join(', ') });
+    
+    ledgerIds.forEach(id => {
+        const tx = transactions.find(t => t.id === id);
+        if (tx) {
+            const updates: any = {};
+            if (type === 'client') {
+                updates.clientStatus = 'Paid';
+                updates.referenceNumber = bankId;
+            } else {
+                updates.ladlyStatus = 'Paid';
+                updates.paymentToLmRef = bankId;
+            }
+            batch.update(doc(db, `users/${user.uid}/ledger/${id}`), updates);
+        }
+    });
+    await batch.commit();
+  }, [user, bankTransactions, transactions]);
+
+  const autoDiscoveredCampaigns = useMemo(() => {
+    const list: Record<string, Campaign> = { ...campaignMetadata };
+    transactions.forEach(t => {
+      if (t.project && !list[t.project]) {
+        list[t.project] = { projectName: t.project, files: [], deliverables: [] };
+      }
+    });
+    return Object.values(list);
+  }, [transactions, campaignMetadata]);
 
   useEffect(() => {
     localStorage.setItem('app-theme', theme);
@@ -323,18 +378,19 @@ const App: React.FC = () => {
     document.documentElement.style.setProperty('--root-font-size', `${fontSize}px`);
   }, [theme, isDarkMode, fontSize, showAedEquivalent, columnWidths, columnLabels, dismissedTips]);
 
-  if (!isAuthenticated) return <SignIn onSignIn={() => { setIsAuthenticated(true); localStorage.setItem('app_auth', 'true'); }} isDarkMode={isDarkMode} onToggleDarkMode={setIsDarkMode} />;
+  if (isAuthChecking) return <div className="h-screen flex items-center justify-center bg-bg-page"><div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent"></div></div>;
+  if (!user) return <SignIn onSignIn={() => {}} isDarkMode={isDarkMode} onToggleDarkMode={setIsDarkMode} />;
 
   const activeEntity = entities.find(e => e.id === currentEntityId) || entities[0];
 
   return (
     <Layout 
       activeTab={activeTab} setActiveTab={setActiveTab} isAnyProcessing={isProcessingExcel || isProcessingBanking || isSyncingZoho} 
-      isAiOpen={isAiOpen} onToggleAi={() => setIsAiOpen(!isAiOpen)} onOpenSettings={() => setIsSettingsOpen(true)} onSignOut={() => { setIsAuthenticated(false); localStorage.setItem('app_auth', 'false'); }} 
-      entities={entities} activeEntity={activeEntity} onSwitchEntity={(id) => { localStorage.setItem('app_active_entity_id', id); window.location.reload(); }}
-      onCreateEntity={(n, l) => { const id = generateId(); const next = [...entities, { id, name: n, logo: l, initials: n.substring(0,2).toUpperCase(), color: 'bg-primary' }]; setEntities(next); localStorage.setItem('app_entities', JSON.stringify(next)); }} 
-      onUpdateEntity={(id, u) => { const next = entities.map(e => e.id === id ? {...e, ...u} : e); setEntities(next); localStorage.setItem('app_entities', JSON.stringify(next)); }} 
-      onDeleteEntity={(id) => { if (entities.length > 1) { const next = entities.filter(e => e.id !== id); setEntities(next); localStorage.setItem('app_entities', JSON.stringify(next)); } }}
+      isAiOpen={isAiOpen} onToggleAi={() => setIsAiOpen(!isAiOpen)} onOpenSettings={() => setIsSettingsOpen(true)} onSignOut={() => signOut(auth)} 
+      entities={entities} activeEntity={activeEntity} onSwitchEntity={(id) => setCurrentEntityId(id)}
+      onCreateEntity={(n, l) => { const id = generateId(); const next = [...entities, { id, name: n, logo: l, initials: n.substring(0,2).toUpperCase(), color: 'bg-primary' }]; setEntities(next); saveMetadata({ entities: next }); }} 
+      onUpdateEntity={(id, u) => { const next = entities.map(e => e.id === id ? {...e, ...u} : e); setEntities(next); saveMetadata({ entities: next }); }} 
+      onDeleteEntity={(id) => { if (entities.length > 1) { const next = entities.filter(e => e.id !== id); setEntities(next); saveMetadata({ entities: next }); } }}
       ledgerCount={transactions.length} bankTxCount={bankTransactions.length}
     >
       {activeTab === 'dashboard' && <Dashboard transactions={transactions} showAedEquivalent={showAedEquivalent} />}
@@ -351,74 +407,32 @@ const App: React.FC = () => {
           isProcessing={isProcessingExcel} columnWidths={columnWidths} onColumnWidthChange={setColumnWidths} 
           columnLabels={columnLabels} onUpdateColumnLabel={(k, l) => setColumnLabels(p => ({...p, [k]: l}))} 
           showAedEquivalent={showAedEquivalent} bankTransactions={bankTransactions} 
-          onReconcile={(tId, bIds, type) => {
-            updateLedger(prev => prev.map(t => {
-              if (t.id === tId) {
-                const updated = { ...t };
-                if (type === 'client') { updated.clientStatus = 'Paid'; updated.referenceNumber = bIds.join(', '); }
-                else { updated.ladlyStatus = 'Paid'; updated.paymentToLmRef = bIds.join(', '); }
-                return updated;
-              }
-              return t;
-            }));
-            setBankTransactions(prev => {
-              const nextB = prev.map(bt => bIds.includes(bt.id) ? { ...bt, matchedTransactionId: tId } : bt);
-              diskSave('bankTransactions', nextB);
-              return nextB;
-            });
-          }} 
+          onReconcile={(tId, bIds, type) => handleLinkBankToLedger(bIds[0], [tId])} 
           onUnlink={(tId, type) => {
-            let matchedRefs = '';
-            updateLedger(prev => prev.map(t => {
-              if (t.id === tId) {
-                const updated = { ...t };
-                matchedRefs = (type === 'client' ? t.referenceNumber : t.paymentToLmRef) || '';
-                if (type === 'client') { updated.referenceNumber = undefined; updated.clientStatus = 'Pending'; }
-                else { updated.paymentToLmRef = undefined; updated.ladlyStatus = 'Pending'; }
-                return updated;
-              }
-              return t;
-            }));
-            const bIds = matchedRefs.split(', ').filter(Boolean);
-            setBankTransactions(prev => {
-              const nextB = prev.map(bt => bIds.includes(bt.id) ? { ...bt, matchedTransactionId: undefined } : bt);
-              diskSave('bankTransactions', nextB);
-              return nextB;
-            });
+            const tx = transactions.find(t => t.id === tId);
+            if (tx) {
+                const updates: any = {};
+                if (type === 'client') { updates.referenceNumber = undefined; updates.clientStatus = 'Pending'; }
+                else { updates.paymentToLmRef = undefined; updates.ladlyStatus = 'Pending'; }
+                handleUpdateTransaction({ ...tx, ...updates });
+            }
           }} 
         />
       )}
       {activeTab === 'banking' && (
         <BankingComponent 
           bankTransactions={bankTransactions} transactions={transactions} 
-          onUpdateBankTransaction={(bt) => { setBankTransactions(prev => { const next = prev.map(i => i.id === bt.id ? bt : i); diskSave('bankTransactions', next); return next; }); }} 
+          onUpdateBankTransaction={(bt) => setDoc(doc(db, `users/${user.uid}/bankTransactions/${bt.id}`), bt)} 
           onUpdateTransaction={handleUpdateTransaction} 
-          onClearBankTransactions={() => { setBankTransactions([]); diskSave('bankTransactions', []); }} 
+          onClearBankTransactions={async () => {
+              const batch = writeBatch(db);
+              bankTransactions.forEach(bt => batch.delete(doc(db, `users/${user.uid}/bankTransactions/${bt.id}`)));
+              await batch.commit();
+          }} 
           onAddExpenseFromBank={handleAddExpenseFromBank} onLinkBankToLedger={handleLinkBankToLedger}
-          onUnlinkBank={(bankId) => {
-             let tId: string | undefined;
-             setBankTransactions(prev => {
-               const bankTx = prev.find(b => b.id === bankId);
-               tId = bankTx?.matchedTransactionId;
-               const next = prev.map(b => b.id === bankId ? { ...b, matchedTransactionId: undefined } : b);
-               diskSave('bankTransactions', next);
-               return next;
-             });
-             if (tId) {
-               const tIds = tId.split(', ').filter(Boolean);
-               updateLedger(prev => prev.map(t => {
-                 if (tIds.includes(t.id)) {
-                   const updated = { ...t };
-                   const cleanRef = (str?: string) => { if (!str) return undefined; const ids = str.split(', ').filter(id => id !== bankId); return ids.length > 0 ? ids.join(', ') : undefined; };
-                   updated.referenceNumber = cleanRef(updated.referenceNumber);
-                   updated.paymentToLmRef = cleanRef(updated.paymentToLmRef);
-                   if (!updated.referenceNumber) updated.clientStatus = 'Pending';
-                   if (!updated.paymentToLmRef) updated.ladlyStatus = 'Pending';
-                   return updated;
-                 }
-                 return t;
-               }));
-             }
+          onUnlinkBank={async (bankId) => {
+             const bt = bankTransactions.find(b => b.id === bankId);
+             if (bt) await updateDoc(doc(db, `users/${user.uid}/bankTransactions/${bt.id}`), { matchedTransactionId: null });
           }}
           onStatementUpload={handleStatementUpload} 
           isProcessing={isProcessingBanking} progress={bankingProgress} statusMsg={bankingStatus} showAedEquivalent={showAedEquivalent} 
@@ -428,63 +442,73 @@ const App: React.FC = () => {
       {activeTab === 'campaigns' && (
         <CampaignTracker 
           transactions={transactions} campaigns={autoDiscoveredCampaigns} rateCard={parsedRateCardData} 
-          onUpdateCampaign={(n, m) => { setCampaignMetadata(prev => { const next: Record<string, Campaign> = { ...prev, [n]: { projectName: n, ...(prev[n] || {}), ...m } as Campaign }; diskSave('campaignMetadata', next); return next; }); }} 
-          onMergeCampaigns={(s, t) => { updateLedger(prev => prev.map(tr => s.includes(tr.project) ? {...tr, project: t, mergedFrom: tr.project !== t ? tr.project : tr.mergedFrom} : tr)); }} 
-          onAddCampaign={(n) => { setCampaignMetadata(prev => { const next = {...prev, [n]: {projectName: n}}; diskSave('campaignMetadata', next); return next; }); }} 
-          onRenameCampaign={(o, n) => { 
-            updateLedger(prev => prev.map(t => t.project === o ? {...t, project: n} : t));
-            setCampaignMetadata(prev => { const nextM = {...prev}; if (nextM[o]) { nextM[n] = {...nextM[o], projectName: n}; delete nextM[o]; } diskSave('campaignMetadata', nextM); return nextM; });
+          onUpdateCampaign={(n, m) => { const next = {...campaignMetadata, [n]: {...(campaignMetadata[n] || {}), ...m, projectName: n}}; setCampaignMetadata(next); saveMetadata({ campaignMetadata: next }); }} 
+          onMergeCampaigns={async (sources, target) => {
+            const batch = writeBatch(db);
+            transactions.forEach(t => {
+                if (sources.includes(t.project)) {
+                    batch.update(doc(db, `users/${user.uid}/ledger/${t.id}`), { project: target, mergedFrom: t.project });
+                }
+            });
+            await batch.commit();
           }} 
+          onAddCampaign={(n) => { const next = {...campaignMetadata, [n]: {projectName: n}}; setCampaignMetadata(next); saveMetadata({ campaignMetadata: next }); }} 
+          onRenameCampaign={async (oldN, newN) => {
+            const batch = writeBatch(db);
+            transactions.forEach(t => { if (t.project === oldN) batch.update(doc(db, `users/${user.uid}/ledger/${t.id}`), { project: newN }); });
+            await batch.commit();
+            const next = {...campaignMetadata}; if (next[oldN]) { next[newN] = {...next[oldN], projectName: newN}; delete next[oldN]; }
+            setCampaignMetadata(next); saveMetadata({ campaignMetadata: next });
+          }}
           selectedProjectName={null} setSelectedProjectName={() => {}} showAedEquivalent={showAedEquivalent} 
         />
       )}
-      {activeTab === 'crm' && <CRM contacts={contacts} onAddContact={(c) => { setContacts(prev => { const next = [c, ...prev]; diskSave('contacts', next); return next; }); }} onDeleteContact={(id) => { setContacts(prev => { const next = prev.filter(c => c.id !== id); diskSave('contacts', next); return next; }); }} onUpdateStatus={(id, s) => { setContacts(prev => { const next = prev.map(c => c.id === id ? {...c, status: s} : c); diskSave('contacts', next); return next; }); }} dismissedTips={dismissedTips} onDismissTip={(id) => setDismissedTips(p => [...p, id])} />}
-      {activeTab === 'resources' && <Resources resources={resources} rateCardData={parsedRateCardData} onUpdateResources={(u) => { setResources(prev => { const next = {...prev, ...u}; diskSave('resources', next); return next; }); }} onUpdateRateCardData={(d) => { setParsedRateCardData(d); diskSave('parsedRateCard', d); }} />}
+      {activeTab === 'crm' && (
+        <CRM 
+          contacts={contacts} 
+          onAddContact={(c) => setDoc(doc(db, `users/${user.uid}/contacts/${c.id}`), c)} 
+          onDeleteContact={(id) => deleteDoc(doc(db, `users/${user.uid}/contacts/${id}`))} 
+          onUpdateStatus={(id, s) => updateDoc(doc(db, `users/${user.uid}/contacts/${id}`), { status: s })} 
+          dismissedTips={dismissedTips} onDismissTip={(id) => setDismissedTips(p => [...p, id])} 
+        />
+      )}
+      {activeTab === 'resources' && (
+        <Resources 
+          resources={resources} rateCardData={parsedRateCardData} 
+          onUpdateResources={(u) => { const next = {...resources, ...u}; setResources(next); saveMetadata({ resources: next }); }} 
+          onUpdateRateCardData={(d) => { setParsedRateCardData(d); saveMetadata({ parsedRateCard: d }); }} 
+        />
+      )}
 
       <Settings 
-        isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} config={zohoConfig} onSaveConfig={(c) => { setZohoConfig(c); diskSave('zohoConfig', c); }} onSync={handleZohoSync} isSyncing={isSyncingZoho} 
-        onClearData={() => { localStorage.clear(); sessionStorage.clear(); window.location.href = window.location.origin; }} 
-        onExport={() => {
-          const exportData = { version: STORAGE_VERSION, timestamp: new Date().toISOString(), entityId: currentEntityId, entities, data: { transactions, contacts, campaignMetadata, bankTransactions, resources, parsedRateCardData, chatHistory, zohoConfig }, ui: { theme, isDarkMode, fontSize, showAedEquivalent, columnWidths, columnLabels, dismissedTips } };
-          const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-          const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `bookeeper_backup_${new Date().toISOString().split('T')[0]}.json`; link.click(); URL.revokeObjectURL(url);
-        }} 
-        onImport={(file) => {
-          const reader = new FileReader();
-          reader.onload = (e) => {
+        isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} config={zohoConfig} 
+        onSaveConfig={(c) => { setZohoConfig(c); saveMetadata({ zohoConfig: c }); }} 
+        onSync={async () => {
+            setIsSyncingZoho(true);
             try {
-              const backup = JSON.parse(e.target?.result as string);
-              if (backup.data) {
-                const { data, ui, entities: impEntities } = backup;
-                if (data.transactions) setTransactions(data.transactions);
-                if (data.bankTransactions) { setBankTransactions(data.bankTransactions); diskSave('bankTransactions', data.bankTransactions); }
-                if (data.contacts) { setContacts(data.contacts); diskSave('contacts', data.contacts); }
-                if (data.campaignMetadata) { setCampaignMetadata(data.campaignMetadata); diskSave('campaignMetadata', data.campaignMetadata); }
-                if (data.resources) { setResources(data.resources); diskSave('resources', data.resources); }
-                if (data.parsedRateCardData) { setParsedRateCardData(data.parsedRateCardData); diskSave('parsedRateCard', data.parsedRateCardData); }
-                if (data.chatHistory) { setChatHistory(data.chatHistory); diskSave('chatHistory', data.chatHistory); }
-                if (data.zohoConfig) { setZohoConfig(data.zohoConfig); diskSave('zohoConfig', data.zohoConfig); }
-                if (impEntities) { setEntities(impEntities); localStorage.setItem('app_entities', JSON.stringify(impEntities)); }
-                if (ui) { setTheme(ui.theme || 'teal'); setIsDarkMode(!!ui.isDarkMode); setFontSize(ui.fontSize || '14'); setShowAedEquivalent(ui.showAedEquivalent !== false); setColumnWidths(ui.columnWidths || {}); setColumnLabels(ui.columnLabels || {}); setDismissedTips(ui.dismissedTips || []); }
-                alert("Global system restore successful.");
-              }
-            } catch (err) { alert("Import failed: Corrupted or invalid backup file."); }
-          };
-          reader.readAsText(file);
+                const invoices = await fetchZohoInvoices(zohoConfig);
+                const batch = writeBatch(db);
+                invoices.forEach(inv => batch.set(doc(db, `users/${user.uid}/ledger/${inv.id}`), inv));
+                await batch.commit();
+                const nextConfig = { ...zohoConfig, lastSync: new Date().toLocaleString() };
+                setZohoConfig(nextConfig); saveMetadata({ zohoConfig: nextConfig });
+            } finally { setIsSyncingZoho(false); }
         }} 
+        isSyncing={isSyncingZoho} 
+        onClearData={async () => {
+            const batch = writeBatch(db);
+            transactions.forEach(t => batch.delete(doc(db, `users/${user.uid}/ledger/${t.id}`)));
+            await batch.commit();
+        }} 
+        onExport={() => {}} onImport={(file) => {}} 
         theme={theme} onSetTheme={setTheme} isDarkMode={isDarkMode} onSetDarkMode={setIsDarkMode} fontSize={fontSize} onSetFontSize={setFontSize} showAedEquivalent={showAedEquivalent} onSetShowAedEquivalent={setShowAedEquivalent} 
       />
 
       <AIChat 
         isOpen={isAiOpen} onClose={() => setIsAiOpen(false)} transactions={transactions} contacts={contacts} campaigns={autoDiscoveredCampaigns} bankTransactions={bankTransactions} 
-        history={chatHistory} onUpdateHistory={(h) => { setChatHistory(h); diskSave('chatHistory', h); }} onNavigateToCampaign={() => { setActiveTab('campaigns'); setIsAiOpen(false); }} 
-        onUpdateLedgerStatus={(ids, field, status) => { 
-            updateLedger(prev => prev.map(t => ids.includes(t.project) ? {...t, [field]: status} : t));
-        }} 
-        onReconcile={(pName, bId) => {
-           const ledgerItem = transactions.find(t => t.project === pName);
-           if (ledgerItem) handleLinkBankToLedger(bId, ledgerItem.id);
-        }} 
+        history={chatHistory} onUpdateHistory={(h) => { setChatHistory(h); saveMetadata({ chatHistory: h }); }} onNavigateToCampaign={() => { setActiveTab('campaigns'); setIsAiOpen(false); }} 
+        onUpdateLedgerStatus={(ids, field, status) => handleBulkUpdateTransactions(ids, { [field]: status })} 
+        onReconcile={(pName, bId) => handleLinkBankToLedger(bId, [transactions.find(t => t.project === pName)?.id || ''])} 
       />
     </Layout>
   );

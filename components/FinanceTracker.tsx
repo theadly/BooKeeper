@@ -14,7 +14,6 @@ import { FINANCE_STATUS_OPTIONS, CATEGORY_OPTIONS, formatCurrency, formatDate } 
 interface FinanceTrackerProps {
   transactions: Transaction[];
   onAddTransaction: (t: Transaction) => void;
-  onAddTransaction: (t: Transaction) => void;
   onUpdateTransaction: (t: Transaction) => void;
   onBulkUpdateTransactions: (ids: string[], updates: Partial<Transaction>) => void;
   onDeleteTransaction: (id: string) => void;
