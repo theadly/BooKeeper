@@ -4,7 +4,7 @@ import { getFirestore } from 'firebase/firestore';
 
 // Configuration obtained from the user's project settings
 const firebaseConfig = {
-  apiKey: "AIzaSyDaaV9dOo59YkiOh-4A_iPbsOrp9Y5R4q0",
+  apiKey: ,
   authDomain: "bookeeper-481607.firebaseapp.com",
   projectId: "bookeeper-481607",
   storageBucket: "bookeeper-481607.firebasestorage.app",
