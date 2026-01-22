@@ -1,18 +1,14 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+// Firebase integration has been removed for Local Mode.
+// These stubs prevent runtime crashes if legacy code attempts to access auth/db.
 
-// Configuration obtained from the user's project settings
-const firebaseConfig = {
-  apiKey: ,
-  authDomain: "bookeeper-481607.firebaseapp.com",
-  projectId: "bookeeper-481607",
-  storageBucket: "bookeeper-481607.firebasestorage.app",
-  messagingSenderId: "503603855698",
-  appId: "1:503603855698:web:6de3d5af8d9c092f72fa8b"
-};
+export const auth = {
+  currentUser: null,
+  signOut: async () => {},
+  onAuthStateChanged: (cb: any) => { cb(null); return () => {}; }
+} as any;
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export default app;
+export const db = {} as any;
+export const googleProvider = {} as any;
+export const serverTimestamp = () => new Date().toISOString();
+
+export default {};

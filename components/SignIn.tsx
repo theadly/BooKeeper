@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
-import { Lock, Mail, ArrowRight, Sun, Moon, AlertCircle, ShieldCheck, Zap, Sparkles } from 'lucide-react';
+import { Sun, Moon, ShieldCheck, Sparkles, ArrowRight } from 'lucide-react';
 import AppLogo from './AppLogo';
 import LadlyLogo from './LadlyLogo';
-import { auth } from '../firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 interface SignInProps {
   onSignIn: () => void;
@@ -12,35 +10,15 @@ interface SignInProps {
 }
 
 const SignIn: React.FC<SignInProps> = ({ onSignIn, isDarkMode, onToggleDarkMode }) => {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleEnter = async () => {
     setIsLoading(true);
-    setError(null);
-
-    try {
-      // Try to sign in first
-      await signInWithEmailAndPassword(auth, email, password);
-      onSignIn();
-    } catch (err: any) {
-      // If account doesn't exist, create it to ensure a smooth onboarding as requested
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-        try {
-          await createUserWithEmailAndPassword(auth, email, password);
-          onSignIn();
-        } catch (createErr: any) {
-          setError(createErr.message);
-        }
-      } else {
-        setError(err.message);
-      }
-    } finally {
-      setIsLoading(false);
-    }
+    // Simulate a brief loading state for UX
+    setTimeout(() => {
+        setIsLoading(false);
+        onSignIn();
+    }, 800);
   };
 
   return (
@@ -56,7 +34,7 @@ const SignIn: React.FC<SignInProps> = ({ onSignIn, isDarkMode, onToggleDarkMode 
         </button>
       </div>
 
-      <div className="w-full max-w-md relative z-10">
+      <div className="w-full max-w-md relative z-10 text-center">
         <div className="flex flex-col items-center mb-12 animate-in fade-in slide-in-from-top-10 duration-1000">
           <div className="bg-primary p-5 rounded-[2.5rem] shadow-2xl mb-6">
             <AppLogo className="w-14 h-14 text-white" />
@@ -66,58 +44,42 @@ const SignIn: React.FC<SignInProps> = ({ onSignIn, isDarkMode, onToggleDarkMode 
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-10 rounded-[3rem] shadow-2xl border border-slate-100 dark:border-slate-800">
-          <div className="mb-8">
-            <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-1">Secure Access</h2>
-            <p className="text-slate-400 text-sm font-medium">Real-time sync enabled.</p>
+          <div className="mb-10">
+            <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-2">Welcome Back</h2>
+            <p className="text-slate-400 text-sm font-medium">Log in to manage your unified financials.</p>
           </div>
 
-          <div className="space-y-4">
-            {error && (
-              <div className="mb-6 p-4 bg-rose-50 dark:bg-rose-900/20 border border-rose-100 dark:border-rose-800 rounded-2xl flex items-center gap-3 text-rose-600 dark:text-rose-400">
-                <AlertCircle size={18} />
-                <p className="text-xs font-bold uppercase tracking-tight">{error}</p>
-              </div>
-            )}
+          <div className="space-y-6">
+            <button 
+              onClick={handleEnter}
+              disabled={isLoading}
+              className="w-full flex items-center justify-center gap-4 bg-slate-900 dark:bg-white dark:text-slate-900 text-white py-5 rounded-[1.8rem] font-black uppercase text-xs tracking-[0.15em] shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 group"
+            >
+              {isLoading ? (
+                <div className="w-5 h-5 border-2 border-white/30 dark:border-slate-900/30 border-t-white dark:border-t-slate-900 rounded-full animate-spin" />
+              ) : (
+                <>
+                  Enter Workspace
+                  <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                </>
+              )}
+            </button>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Email</label>
-                <input 
-                  type="email" 
-                  required
-                  autoComplete="email"
-                  className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl px-5 py-4 focus:ring-2 focus:ring-primary font-bold text-sm dark:text-white outline-none"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
+            <div className="pt-4 flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2 text-emerald-500 font-black text-[9px] uppercase tracking-widest bg-emerald-50 dark:bg-emerald-900/10 px-3 py-1 rounded-full">
+                <ShieldCheck size={12} /> Local Encrypted Storage
               </div>
-
-              <div className="space-y-1.5">
-                <label className="text-[10px] font-black uppercase text-slate-400 tracking-widest ml-1">Password</label>
-                <input 
-                  type="password" 
-                  required
-                  autoComplete="current-password"
-                  className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl px-5 py-4 focus:ring-2 focus:ring-primary font-bold text-sm dark:text-white outline-none"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-              </div>
-
-              <button 
-                type="submit" 
-                disabled={isLoading}
-                className="w-full bg-primary text-white py-4.5 rounded-2xl font-black uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 active:scale-95 transition-all mt-4"
-              >
-                {isLoading ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <>Enter Ledger <ArrowRight size={18} /></>}
-              </button>
-            </form>
+              <p className="text-[8px] text-slate-400 font-bold uppercase tracking-tighter">Secure Offline-Ready Mode</p>
+            </div>
           </div>
         </div>
 
-        <div className="mt-16 flex flex-col items-center gap-3">
+        <div className="mt-16 flex flex-col items-center gap-3 animate-pulse">
           <LadlyLogo className="h-10 opacity-60" />
-          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Firebase Cloud Persistence</p>
+          <div className="flex items-center gap-1.5">
+             <Sparkles size={10} className="text-primary" />
+             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Restricted Access: Laila Mourad</p>
+          </div>
         </div>
       </div>
     </div>

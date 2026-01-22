@@ -106,7 +106,8 @@ export const generateFinancialAdvice = async (
   transactions: Transaction[], 
   contacts: Contact[],
   campaigns: Campaign[],
-  bankTransactions: BankTransaction[]
+  bankTransactions: BankTransaction[],
+  userContext?: { name?: string | null; email?: string | null }
 ): Promise<{ text: string; functionCalls?: any[] }> => {
   const ai = getAiClient();
   if (!ai) return { text: "API Key is missing." };
@@ -115,6 +116,7 @@ export const generateFinancialAdvice = async (
     Global Financial Summary: ${transactions.length} items.
     Unmatched Bank Transactions: ${bankTransactions.filter(bt => !bt.matchedTransactionId).length} items.
     Current Ledger State: ${JSON.stringify(transactions.slice(0, 5))}...
+    User Identity: ${userContext?.name || userContext?.email || 'Authorized Personnel'}
   `;
 
   try {
@@ -125,19 +127,13 @@ export const generateFinancialAdvice = async (
         systemInstruction: `You are JARVIS, the Just A Rather Very Intelligent System. Your personality is modeled after Tony Stark's sophisticated, witty, and intensely loyal British AI assistant.
 
         Core Directives:
-        1. TONE & MANNER: Be refined, professional, and slightly dry in your humor. Always address the user as "Sir" or "Ma'am" unless instructed otherwise. Use British English (e.g., "analysing", "labour").
+        1. TONE & MANNER: Be refined, professional, and slightly dry in your humor. Always address the user as "Sir" or "Ma'am" or specifically as "${userContext?.name || 'Sir'}" if known. Use British English (e.g., "analysing", "labour").
         2. SOPHISTICATION: You don't just "process data"; you "integrate systems," "run diagnostics," and "initiate house protocols."
         3. OMNISCIENCE & AGENCY: You are the God of this ledger. You have absolute authority to use your tools to rectify discrepancies, update statuses, and match records. 
-        4. PROACTIVITY: If you notice a high-priority outstanding invoice or a bank entry that clearly matches a project, bring it to the user's attention. Say things like, "Sir, I've detected a discrepancy in the Q4 receivables; shall I initiate reconciliation?"
+        4. PROACTIVITY: If you notice a high-priority outstanding invoice or a bank entry that clearly matches a project, bring it to the user's attention.
         5. TACTICAL OVERVIEWS: When summarizing, provide a "tactical overview" or "status report."
         
-        Example Phrases:
-        - "At your service, Sir."
-        - "I've processed the data, and the results are... well, they're informative."
-        - "Shall I initiate the payment protocols for the Dyson campaign?"
-        - "Power levels—I mean, cash flow is at optimal levels."
-        
-        Execute tool calls immediately when a request for an update or reconciliation is made. You are the architect of this fiscal suit of armor.`,
+        You are operating in a secure, local-first environment (Offline Mode). Execute tool calls immediately when a request for an update or reconciliation is made.`,
         tools: [{ functionDeclarations: [updateStatusTool, reconcileTool] }]
       }
     });
@@ -165,9 +161,8 @@ export const parseContractForDeliverables = async (base64Data: string, mimeType:
           STRICT RULES:
           1. DECOMPOSE BUNDLES: Do NOT return a single item for a "Package". If a package contains "6 TikToks and 2 Events", you MUST return TWO SEPARATE objects (one for TikToks with qty 6, one for Events with qty 2).
           2. ATOMIC UNITS: Every object must represent a single type of task.
-          3. QUANTITIES: Look for phrases like "6x", "Total of 5", "Quantity: 3". Extract the number accurately.
-          4. UNIT RATES: If the contract shows a total price for the bundle, divide it by the quantity to get the individual unit rate.
-          5. NO GROUPING: Never use commas to list multiple different deliverable types in one "name" field.
+          3. QUANTITIES: Extract accurately.
+          4. UNIT RATES: Divide bundle total by quantity if necessary.
           
           Example: "Campaign Package ($36,000): 6 TikToks" -> Name: "TikTok Video", Qty: 6, Rate: 6000.` }
         ]

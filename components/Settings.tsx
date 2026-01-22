@@ -1,9 +1,8 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { ZohoConfig } from '../types';
 import { 
   Save, RefreshCw, CheckCircle, Trash2, Download, 
-  UploadCloud, Palette, Moon, Sun, X, AlertTriangle, ShieldCheck, Database, Lock, Mail, Key, Eye, EyeOff, Globe, Type
+  UploadCloud, Palette, Moon, Sun, X, AlertTriangle, ShieldCheck, Database, Lock, Mail, Key, Eye, EyeOff, Globe, Type, User
 } from 'lucide-react';
 import { CONFIG } from '../config';
 
@@ -145,10 +144,10 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
 
               <div className="space-y-6">
-                <div className="flex items-center gap-3"><Lock size={20} className="text-primary" /><h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest">Access Security</h3></div>
+                <div className="flex items-center gap-3"><User size={20} className="text-primary" /><h3 className="text-sm font-black text-gray-900 dark:text-white uppercase tracking-widest">User Profile</h3></div>
                 <div className="p-6 bg-slate-50 dark:bg-slate-900/30 rounded-3xl border border-slate-100 dark:border-slate-800 space-y-5">
                    <div className="space-y-1.5">
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Login Email</label>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Display Email</label>
                       <div className="relative">
                         <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
                         <input 
@@ -160,7 +159,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                    </div>
                    <div className="space-y-1.5">
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Access Password</label>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Session Pin (Optional)</label>
                       <div className="relative">
                         <Key className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={16} />
                         <input 

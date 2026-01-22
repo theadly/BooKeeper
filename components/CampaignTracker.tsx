@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useMemo, useCallback } from 'react';
 import { Campaign, Transaction, CampaignFile, Deliverable, ParsedRateItem } from '../types';
 import { formatCurrency, formatDate, RATE_CARD_SERVICES } from '../constants';
@@ -82,8 +83,14 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
 
   const selectedCampaignData = useMemo(() => {
     if (!selectedProjectName) return null;
-    const projectTransactions = transactions.filter(t => t.project === selectedProjectName);
     const metadata = campaigns.find(c => c.projectName === selectedProjectName);
+    const mergedSources = metadata?.mergedSources || [];
+    
+    // Aggregating transactions from canonical name and all virtual sources
+    const projectTransactions = transactions.filter(t => 
+       t.project === selectedProjectName || mergedSources.includes(t.project)
+    );
+
     const totalAmount = projectTransactions.reduce((sum: number, t: Transaction) => sum + t.amount, 0);
     const totalPaid = projectTransactions.reduce((sum: number, t: Transaction) => sum + (t.clientPayment || 0), 0);
     const totalVat = projectTransactions.reduce((sum: number, t: Transaction) => sum + (t.vat || 0), 0);
@@ -97,7 +104,8 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
 
     const groupedLines: Record<string, Transaction[]> = {};
     projectTransactions.forEach(t => {
-      const key = t.mergedFrom || 'Original';
+      // Group by the actual project name in the ledger
+      const key = t.project;
       if (!groupedLines[key]) groupedLines[key] = [];
       groupedLines[key].push(t);
     });
@@ -106,7 +114,6 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
     campaignDeliverables.forEach((d: Deliverable) => {
       if (!d) return;
       const rawName = d.name || 'Item';
-      // More aggressive cleanup for summary view
       const baseName = rawName.replace(/\s*\(?\d+\/\d+\)?/g, '').replace(/\s*\d+\/\d+/g, '').replace(/\s*Part\s*\d+/gi, '').trim();
       if (!deliverableGroups[baseName]) deliverableGroups[baseName] = { total: 0, completed: 0 };
       deliverableGroups[baseName].total += 1;
@@ -141,7 +148,6 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
     }
     if (selectedFolders.size < 2) return;
     const foldersArray = Array.from(selectedFolders);
-    // Explicitly type reduce parameters to avoid unknown inference
     const targetName = foldersArray.reduce((a: string, b: string) => a.length > b.length ? a : b);
     onMergeCampaigns(foldersArray, targetName);
     setSelectedFolders(new Set());
@@ -160,8 +166,6 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
       extracted.forEach(item => {
         const qty = Math.max(1, item.quantity);
         const unitRate = item.rate || 0;
-        
-        // Ensure names are atomic
         const cleanName = item.name.replace(/^[x\d]+\s*/, '').replace(/:\s*.*$/, '').trim();
         
         for (let i = 0; i < qty; i++) {
@@ -185,7 +189,6 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
     } finally { setIsScanning(false); }
   }, [campaigns, onUpdateCampaign]);
 
-  // Fix: Explicitly handle unparsed as CampaignFile[] to ensure length property is accessible
   const handleManualScan = () => {
     const filesList = (selectedCampaignData?.metadata?.files || []) as CampaignFile[];
     const unparsed = filesList.filter((f: CampaignFile) => f.isContract && !f.parsed);
@@ -290,15 +293,20 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
   const filteredCampaigns = useMemo<Campaign[]>(() => {
     const list = campaigns.filter((c: Campaign) => {
       const matchesSearch = !searchQuery.trim() || c.projectName.toLowerCase().includes(searchQuery.toLowerCase());
-      const projectLines: Transaction[] = transactions.filter((t: Transaction) => t.project === c.projectName);
+      const mergedSources = c.mergedSources || [];
+      const projectLines: Transaction[] = transactions.filter((t: Transaction) => 
+        t.project === c.projectName || mergedSources.includes(t.project)
+      );
       return matchesSearch && 
              (yearFilter === 'All' || projectLines.some((t: Transaction) => t.year.toString() === yearFilter)) && 
              (clientFilter === 'All' || projectLines.some((t: Transaction) => t.customerName === clientFilter));
     });
 
     return list.sort((a: Campaign, b: Campaign) => {
-      const linesA: Transaction[] = transactions.filter((t: Transaction) => t.project === a.projectName);
-      const linesB: Transaction[] = transactions.filter((t: Transaction) => t.project === b.projectName);
+      const mergedA = a.mergedSources || [];
+      const linesA: Transaction[] = transactions.filter((t: Transaction) => t.project === a.projectName || mergedA.includes(t.project));
+      const mergedB = b.mergedSources || [];
+      const linesB: Transaction[] = transactions.filter((t: Transaction) => t.project === b.projectName || mergedB.includes(t.project));
       
       if (sortBy === 'name') return (a.projectName || '').localeCompare(b.projectName || '');
       if (sortBy === 'year') {
@@ -320,11 +328,11 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
     });
   }, [campaigns, searchQuery, yearFilter, clientFilter, sortBy, transactions]);
 
-  // Grouping Campaigns by Year
   const campaignsByYear = useMemo<[string, Campaign[]][]>(() => {
     const grouped: Record<string, Campaign[]> = {};
     filteredCampaigns.forEach(c => {
-      const lines: Transaction[] = transactions.filter((t: Transaction) => t.project === c.projectName);
+      const merged = c.mergedSources || [];
+      const lines: Transaction[] = transactions.filter((t: Transaction) => t.project === c.projectName || merged.includes(t.project));
       const year = lines.length > 0 
         ? Math.max(...lines.map((t: Transaction) => t.year)).toString() 
         : new Date().getFullYear().toString();
@@ -336,7 +344,6 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
   }, [filteredCampaigns, transactions]);
 
   const handleCardClick = (projectName: string) => {
-    // If we have an active bulk selection, prioritize that.
     if (selectedFolders.size > 0) {
       toggleFolderSelection(projectName);
     } else {
@@ -448,7 +455,6 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
                              </div>
                            </div>
                          </div></div>
-                         {/* Fix: use item.id instead of id */}
                          <div className="flex items-center gap-1 shrink-0"><button onClick={() => removeDeliverable(item.id)} className="p-2 text-slate-300 dark:text-slate-700 hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/10 rounded-xl transition-all"><Trash2 size={16} /></button></div>
                        </div>
                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-slate-50 dark:border-slate-800/50">
@@ -467,8 +473,30 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
           <section className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden">
              <div className="px-6 py-4 border-b border-slate-50 dark:border-slate-800 flex items-center justify-between bg-slate-50/20 dark:bg-slate-800/20"><div className="flex items-center gap-2"><Folder size={18} className="text-teal-600" /><h3 className="text-[11px] font-black text-slate-900 dark:text-white uppercase tracking-widest">Consolidated Ledger</h3></div></div>
              <div className="p-4 sm:p-6 space-y-6">
-               {/* Fix: cast Object.entries to provide explicit types for map iteration */}
-               {(Object.entries(groupedLines) as [string, Transaction[]][]).map(([groupName, lines]) => (<div key={groupName} className="space-y-3"><div className="flex items-center gap-2 mb-2"><span className="text-[8px] sm:text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md tracking-widest">Source: {groupName}</span><div className="h-px bg-slate-50 dark:bg-slate-800 flex-1" /></div><div className="space-y-2">{lines.map(line => (<div key={line.id} className="flex items-center justify-between p-3 sm:p-4 bg-slate-50/30 dark:bg-slate-800/20 rounded-xl border border-slate-100 dark:border-slate-800 hover:border-teal-500/10 transition-all"><div className="flex-1 min-w-0"><p className="font-bold text-slate-900 dark:text-white text-xs truncate">{line.customerName || 'Internal'}</p><p className="text-[9px] text-slate-400 font-bold uppercase tracking-tight mt-0.5">{line.invoiceNumber || 'No Inv'} • {formatDate(line.date)}</p></div><div className="text-right ml-3"><p className="font-black text-slate-900 dark:text-white text-xs">{formatCurrency(line.amount, line.currency, showAedEquivalent)}</p><p className={`text-[8px] font-black uppercase mt-0.5 ${line.clientStatus === 'Paid' ? 'text-emerald-600' : 'text-amber-600'}`}>{line.clientStatus}</p></div></div>))}</div></div>))}
+               {(Object.entries(groupedLines) as [string, Transaction[]][]).map(([groupName, lines]) => (
+                 <div key={groupName} className="space-y-3">
+                   <div className="flex items-center gap-2 mb-2">
+                     <span className="text-[8px] sm:text-[9px] font-black uppercase text-slate-400 dark:text-slate-500 bg-slate-50 dark:bg-slate-800 px-2 py-1 rounded-md tracking-widest">
+                       {groupName === projectName ? 'Folder Direct' : `Virtual Source: ${groupName}`}
+                     </span>
+                     <div className="h-px bg-slate-50 dark:bg-slate-800 flex-1" />
+                   </div>
+                   <div className="space-y-2">
+                     {lines.map(line => (
+                       <div key={line.id} className="flex items-center justify-between p-3 sm:p-4 bg-slate-50/30 dark:bg-slate-800/20 rounded-xl border border-slate-100 dark:border-slate-800 hover:border-teal-500/10 transition-all">
+                         <div className="flex-1 min-w-0">
+                           <p className="font-bold text-slate-900 dark:text-white text-xs truncate">{line.customerName || 'Internal'}</p>
+                           <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tight mt-0.5">{line.invoiceNumber || 'No Inv'} • {formatDate(line.date)}</p>
+                         </div>
+                         <div className="text-right ml-3">
+                           <p className="font-black text-slate-900 dark:text-white text-xs">{formatCurrency(line.amount, line.currency, showAedEquivalent)}</p>
+                           <p className={`text-[8px] font-black uppercase mt-0.5 ${line.clientStatus === 'Paid' ? 'text-emerald-600' : 'text-amber-600'}`}>{line.clientStatus}</p>
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+               ))}
              </div>
           </section>
         </div>
@@ -498,7 +526,6 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
           <div className="h-48 flex flex-col items-center justify-center text-slate-300 dark:text-slate-700 font-black uppercase text-[9px] tracking-[0.2em] border-2 border-dashed border-slate-100 dark:border-slate-800 bg-white/30 dark:bg-slate-900/30"><Search size={32} className="mb-3 opacity-5" /><p>No Results Found</p></div>
         ) : (
           campaignsByYear.map(([year, campaignsList]: [string, Campaign[]]) => {
-            // Fix: Explicitly handle the campaign list as typed array to avoid unknown inference
             const yearlyCampaigns = campaignsList;
             return (
               <div key={year} className="space-y-4">
@@ -511,7 +538,8 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
                 </div>
                 <div className={`grid gap-3 ${viewType === 'grid' ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6' : 'grid-cols-1'}`}>
                   {yearlyCampaigns.map((campaign: Campaign) => {
-                    const lines: Transaction[] = transactions.filter(t => t.project === campaign.projectName);
+                    const merged = campaign.mergedSources || [];
+                    const lines: Transaction[] = transactions.filter(t => t.project === campaign.projectName || merged.includes(t.project));
                     const total = lines.reduce((sum, t) => sum + t.amount, 0);
                     const isSelected = selectedFolders.has(campaign.projectName);
                     const clientName = lines.length > 0 ? (lines[0] as Transaction).customerName : '-';
@@ -528,7 +556,10 @@ const CampaignTracker: React.FC<CampaignTrackerProps> = ({
                             <div className="mb-2.5"><BrandAvatar name={campaign.projectName} size="md" /></div>
                             <h3 className="text-[11px] font-black text-slate-900 dark:text-white mb-0.5 tracking-tight group-hover:text-primary transition-colors truncate pr-6">{campaign.projectName}</h3>
                             <p className="text-[9px] font-bold text-slate-400 dark:text-slate-500 mb-2 uppercase tracking-tight">{clientName}</p>
-                            <div className="flex wrap gap-1 mb-2.5"><span className="text-[7px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest bg-slate-50 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-100 dark:border-slate-800">{lines.length} Line{lines.length !== 1 ? 's' : ''}</span></div>
+                            <div className="flex wrap gap-1 mb-2.5">
+                              <span className="text-[7px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest bg-slate-50 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-100 dark:border-slate-800">{lines.length} Line{lines.length !== 1 ? 's' : ''}</span>
+                              {merged.length > 0 && <span className="text-[7px] font-black text-teal-600 uppercase tracking-widest bg-teal-50 dark:bg-teal-900/20 px-1.5 py-0.5 rounded border border-teal-100 dark:border-teal-800">{merged.length} Consolidated</span>}
+                            </div>
                             <div className="text-[8px] font-bold text-slate-400 dark:text-slate-500 flex items-center gap-1"><Clock size={10} /> {lines.length > 0 ? formatDate(lines[0]?.date) : 'Recently Created'}</div>
                           </div>
                           <div className="px-3.5 py-2.5 bg-slate-50/40 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between"><div className="text-[10px] font-black text-slate-900 dark:text-white">{formatCurrency(total, 'AED', showAedEquivalent)}</div><div className="text-7px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-1">Open <ArrowRight size={8}/></div></div>

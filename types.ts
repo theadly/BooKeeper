@@ -141,6 +141,7 @@ export interface Campaign {
   notes?: string;
   files?: CampaignFile[];
   deliverables?: Deliverable[];
+  mergedSources?: string[];
 }
 
 export enum LeadStatus {

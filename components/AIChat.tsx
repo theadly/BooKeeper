@@ -1,8 +1,7 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { AIChatMessage, Transaction, Contact, Campaign, BankTransaction, StatusOption } from '../types';
 import { generateFinancialAdvice } from '../services/geminiService';
-import { Send, User, Sparkles, Trash2, ExternalLink, X, Minus, CheckCircle, Activity } from 'lucide-react';
+import { Send, User, Trash2, ExternalLink, Minus, Activity } from 'lucide-react';
 import JarvisIcon from './JarvisIcon';
 import LadlyLogo from './LadlyLogo';
 
@@ -40,10 +39,11 @@ const AIChat: React.FC<AIChatProps> = ({
 
   useEffect(() => {
     if (history.length === 0) {
+      // Default greeting without relying on auth provider
       onUpdateHistory([{
         id: 'welcome',
         role: 'model',
-        text: "At your service, Sir. All systems are online and the ledger is ready for your inspection. How may I assist you today?",
+        text: `At your service, Laila. All systems are online and the ledger is ready for your inspection. How may I assist you today?`,
         timestamp: new Date()
       }]);
     }
@@ -64,7 +64,17 @@ const AIChat: React.FC<AIChatProps> = ({
     setInput('');
     setIsLoading(true);
 
-    const response = await generateFinancialAdvice(input, transactions, contacts, campaigns, bankTransactions);
+    // Mock user context since we removed Firebase Auth
+    const currentUser = { displayName: 'Laila Mourad', email: 'admin@bookeeper.com' };
+    
+    const response = await generateFinancialAdvice(
+      input, 
+      transactions, 
+      contacts, 
+      campaigns, 
+      bankTransactions,
+      { name: currentUser.displayName, email: currentUser.email }
+    );
 
     // Process Function Calls if any
     if (response.functionCalls && response.functionCalls.length > 0) {
