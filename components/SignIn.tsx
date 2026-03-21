@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Sun, Moon, ShieldCheck, Sparkles, ArrowRight } from 'lucide-react';
 import AppLogo from './AppLogo';
 import LadlyLogo from './LadlyLogo';
+import { signInWithGoogle } from '../services/supabaseService';
 
 interface SignInProps {
   onSignIn: () => void;
@@ -9,22 +10,35 @@ interface SignInProps {
   onToggleDarkMode: (isDark: boolean) => void;
 }
 
+const GoogleIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
+    <path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+    <path d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/>
+    <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+  </svg>
+);
+
 const SignIn: React.FC<SignInProps> = ({ onSignIn, isDarkMode, onToggleDarkMode }) => {
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleEnter = async () => {
+  const handleGoogleSignIn = async () => {
     setIsLoading(true);
-    // Simulate a brief loading state for UX
-    setTimeout(() => {
-        setIsLoading(false);
-        onSignIn();
-    }, 800);
+    setError('');
+    try {
+      await signInWithGoogle();
+      // Supabase will redirect back — onSignIn called via auth state change in App
+    } catch (err: any) {
+      setError(err.message || 'Sign in failed. Please try again.');
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen bg-[#F9F7F2] dark:bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden transition-colors duration-500">
       <div className="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-primary/5 rounded-full blur-3xl animate-pulse" />
-      
+
       <div className="absolute top-8 right-8 z-50">
         <button
           onClick={() => onToggleDarkMode(!isDarkMode)}
@@ -49,27 +63,28 @@ const SignIn: React.FC<SignInProps> = ({ onSignIn, isDarkMode, onToggleDarkMode 
             <p className="text-slate-400 text-sm font-medium">Log in to manage your unified financials.</p>
           </div>
 
-          <div className="space-y-6">
-            <button 
-              onClick={handleEnter}
+          <div className="space-y-4">
+            <button
+              onClick={handleGoogleSignIn}
               disabled={isLoading}
-              className="w-full flex items-center justify-center gap-4 bg-slate-900 dark:bg-white dark:text-slate-900 text-white py-5 rounded-[1.8rem] font-black uppercase text-xs tracking-[0.15em] shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 group"
+              className="w-full flex items-center justify-center gap-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 py-4 rounded-[1.8rem] font-bold text-sm shadow hover:shadow-md hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
             >
               {isLoading ? (
-                <div className="w-5 h-5 border-2 border-white/30 dark:border-slate-900/30 border-t-white dark:border-t-slate-900 rounded-full animate-spin" />
+                <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-700 rounded-full animate-spin" />
               ) : (
                 <>
-                  Enter Workspace
-                  <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                  <GoogleIcon />
+                  Continue with Google
                 </>
               )}
             </button>
 
-            <div className="pt-4 flex flex-col items-center gap-2">
+            {error && <p className="text-red-500 text-xs font-medium">{error}</p>}
+
+            <div className="pt-2 flex flex-col items-center gap-2">
               <div className="flex items-center gap-2 text-emerald-500 font-black text-[9px] uppercase tracking-widest bg-emerald-50 dark:bg-emerald-900/10 px-3 py-1 rounded-full">
-                <ShieldCheck size={12} /> Local Encrypted Storage
+                <ShieldCheck size={12} /> Secured by Supabase Auth
               </div>
-              <p className="text-[8px] text-slate-400 font-bold uppercase tracking-tighter">Secure Offline-Ready Mode</p>
             </div>
           </div>
         </div>

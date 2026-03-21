@@ -19,6 +19,8 @@ import { RATE_CARD_SERVICES } from './constants';
 import { parseBankStatement } from './services/geminiService';
 import { fetchZohoInvoices } from './services/zohoService';
 import {
+  supabase,
+  signInWithGoogle, signOut as supabaseSignOut,
   loadEntities, upsertEntity, deleteEntity,
   loadTransactions, upsertTransaction, upsertTransactions, deleteTransaction, deleteTransactions,
   loadContacts, upsertContact, deleteContact,
@@ -32,13 +34,6 @@ import { CONFIG } from './config';
 const generateId = () => crypto.randomUUID();
 const DEFAULT_ENTITY: Entity = { id: 'e1', name: 'Laila Mourad', initials: 'LM', color: 'bg-primary' };
 
-// Mock User for Local Mode
-const MOCK_USER = {
-  uid: 'local-admin',
-  displayName: 'Laila Mourad',
-  email: 'admin@bookeeper.com',
-  photoURL: null
-};
 
 const App: React.FC = () => {
   const [user, setUser] = useState<any>(null);
@@ -74,13 +69,10 @@ const App: React.FC = () => {
   const [bankingProgress, setBankingProgress] = useState(0);
   const [bankingStatus, setBankingStatus] = useState('');
 
-  // --- Supabase Data Loading ---
+  // --- Auth + Data Loading ---
 
-  useEffect(() => {
-    const savedUser = localStorage.getItem('bk_user_session');
-    if (savedUser) setUser(JSON.parse(savedUser));
-
-    Promise.all([
+  const loadAllData = useCallback(async () => {
+    await Promise.all([
       loadEntities().then(d => d.length ? setEntities(d) : null),
       loadTransactions().then(setTransactions),
       loadContacts().then(setContacts),
@@ -90,17 +82,37 @@ const App: React.FC = () => {
       loadSetting('parsedRateCard', RATE_CARD_SERVICES).then(setParsedRateCardData),
       loadSetting('chatHistory', []).then(setChatHistory),
       loadSetting('zohoConfig', { accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' }).then(setZohoConfig),
-    ]).catch(console.error).finally(() => setIsAuthChecking(false));
+    ]).catch(console.error);
   }, []);
 
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setUser(session.user);
+        loadAllData();
+      }
+      setIsAuthChecking(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        setUser(session.user);
+        if (event === 'SIGNED_IN') loadAllData();
+      } else {
+        setUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [loadAllData]);
+
   const handleSignIn = () => {
-    setUser(MOCK_USER);
-    localStorage.setItem('bk_user_session', JSON.stringify(MOCK_USER));
+    signInWithGoogle().catch(console.error);
   };
 
   const handleSignOut = () => {
     setUser(null);
-    localStorage.removeItem('bk_user_session');
+    supabaseSignOut().catch(console.error);
   };
 
   // --- Logic Handlers (Updated to use local State + LocalStorage) ---
