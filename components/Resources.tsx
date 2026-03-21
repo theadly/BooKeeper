@@ -162,7 +162,7 @@ const Resources: React.FC<ResourcesProps> = ({ resources, rateCardData, onUpdate
                   {!isEditingRateCard ? (
                     <>
                       <button onClick={startEditingRateCard} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl hover:bg-primary/10 hover:text-primary transition-all text-slate-400" title="Edit Services"><Edit3 size={18}/></button>
-                      <button onClick={exportAsPDF} disabled={isExporting} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-all text-slate-400 disabled:opacity-50" title="Export PDF">{isExporting ? <Loader2 size={18} className="animate-spin" /> : <FileDown size={18}/></button>
+                      <button onClick={exportAsPDF} disabled={isExporting} className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-all text-slate-400 disabled:opacity-50" title="Export PDF">{isExporting ? <Loader2 size={18} className="animate-spin" /> : <FileDown size={18}/>}</button>
                     </>
                   ) : (<button onClick={saveRateCardData} className="p-3 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 transition-all" title="Save"><Save size={18}/></button>)}
                </div>

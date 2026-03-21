@@ -18,6 +18,14 @@ import {
 import { RATE_CARD_SERVICES } from './constants';
 import { parseBankStatement } from './services/geminiService';
 import { fetchZohoInvoices } from './services/zohoService';
+import {
+  loadEntities, upsertEntity, deleteEntity,
+  loadTransactions, upsertTransaction, upsertTransactions, deleteTransaction, deleteTransactions,
+  loadContacts, upsertContact, deleteContact,
+  loadCampaigns, upsertCampaign, deleteCampaign,
+  loadBankTransactions, upsertBankTransaction, upsertBankTransactions, clearBankTransactions,
+  loadSetting, saveSetting,
+} from './services/supabaseService';
 import * as XLSX from 'xlsx';
 import { CONFIG } from './config';
 
@@ -66,46 +74,24 @@ const App: React.FC = () => {
   const [bankingProgress, setBankingProgress] = useState(0);
   const [bankingStatus, setBankingStatus] = useState('');
 
-  // --- Local Storage Persistence ---
-  
-  // Load data on mount
+  // --- Supabase Data Loading ---
+
   useEffect(() => {
-    const load = <T,>(key: string, setter: React.Dispatch<React.SetStateAction<T>>, defaultVal: T) => {
-      const saved = localStorage.getItem(`bk_${key}`);
-      if (saved) {
-        try {
-          setter(JSON.parse(saved));
-        } catch (e) {
-          console.error(`Failed to load ${key}`, e);
-          setter(defaultVal);
-        }
-      } else {
-        setter(defaultVal);
-      }
-    };
+    const savedUser = localStorage.getItem('bk_user_session');
+    if (savedUser) setUser(JSON.parse(savedUser));
 
-    // Simulate auth check delay
-    setTimeout(() => {
-      const savedUser = localStorage.getItem('bk_user_session');
-      if (savedUser) setUser(JSON.parse(savedUser));
-      setIsAuthChecking(false);
-    }, 500);
-
-    load('entities', setEntities, [DEFAULT_ENTITY]);
-    load('transactions', setTransactions, []);
-    load('contacts', setContacts, []);
-    load('campaignMetadata', setCampaignMetadata, {});
-    load('bankTransactions', setBankTransactions, []);
-    load('resources', setResources, { mediaKit: null, rateCard: null });
-    load('parsedRateCard', setParsedRateCardData, RATE_CARD_SERVICES);
-    load('chatHistory', setChatHistory, []);
-    load('zohoConfig', setZohoConfig, { accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' });
+    Promise.all([
+      loadEntities().then(d => d.length ? setEntities(d) : null),
+      loadTransactions().then(setTransactions),
+      loadContacts().then(setContacts),
+      loadCampaigns().then(setCampaignMetadata),
+      loadBankTransactions().then(setBankTransactions),
+      loadSetting('resources', { mediaKit: null, rateCard: null }).then(setResources),
+      loadSetting('parsedRateCard', RATE_CARD_SERVICES).then(setParsedRateCardData),
+      loadSetting('chatHistory', []).then(setChatHistory),
+      loadSetting('zohoConfig', { accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' }).then(setZohoConfig),
+    ]).catch(console.error).finally(() => setIsAuthChecking(false));
   }, []);
-
-  // Save helpers
-  const save = (key: string, data: any) => {
-    localStorage.setItem(`bk_${key}`, JSON.stringify(data));
-  };
 
   const handleSignIn = () => {
     setUser(MOCK_USER);
@@ -120,51 +106,48 @@ const App: React.FC = () => {
   // --- Logic Handlers (Updated to use local State + LocalStorage) ---
 
   const handleAddTransaction = (t: Transaction) => {
-    const newData = [...transactions, { ...t, createdAt: new Date().toISOString() }];
-    setTransactions(newData);
-    save('transactions', newData);
+    setTransactions(prev => [...prev, t]);
+    upsertTransaction(t).catch(console.error);
   };
 
   const handleUpdateTransaction = (updated: Transaction) => {
-    const newData = transactions.map(t => t.id === updated.id ? { ...updated, updatedAt: new Date().toISOString() } : t);
-    setTransactions(newData);
-    save('transactions', newData);
+    setTransactions(prev => prev.map(t => t.id === updated.id ? updated : t));
+    upsertTransaction(updated).catch(console.error);
   };
 
   const handleDeleteTransaction = (id: string) => {
-    const newData = transactions.filter(t => t.id !== id);
-    setTransactions(newData);
-    save('transactions', newData);
+    setTransactions(prev => prev.filter(t => t.id !== id));
+    deleteTransaction(id).catch(console.error);
   };
 
   const handleBulkUpdateTransactions = (ids: string[], updates: Partial<Transaction>) => {
-    const newData = transactions.map(t => ids.includes(t.id) ? { ...t, ...updates, updatedAt: new Date().toISOString() } : t);
-    setTransactions(newData);
-    save('transactions', newData);
+    const updated: Transaction[] = [];
+    setTransactions(prev => prev.map(t => {
+      if (ids.includes(t.id)) { const u = { ...t, ...updates }; updated.push(u); return u; }
+      return t;
+    }));
+    upsertTransactions(updated).catch(console.error);
   };
 
   const handleBulkDeleteTransactions = (ids: string[]) => {
-    const newData = transactions.filter(t => !ids.includes(t.id));
-    setTransactions(newData);
-    save('transactions', newData);
+    setTransactions(prev => prev.filter(t => !ids.includes(t.id)));
+    deleteTransactions(ids).catch(console.error);
   };
 
   const handleAddContact = (c: Contact) => {
-    const newData = [...contacts, { ...c, createdAt: new Date().toISOString() }];
-    setContacts(newData);
-    save('contacts', newData);
+    setContacts(prev => [...prev, c]);
+    upsertContact(c).catch(console.error);
   };
 
   const handleUpdateContactStatus = (id: string, status: any) => {
-    const newData = contacts.map(c => c.id === id ? { ...c, status, updatedAt: new Date().toISOString() } : c);
-    setContacts(newData);
-    save('contacts', newData);
+    let updated: Contact | undefined;
+    setContacts(prev => prev.map(c => { if (c.id === id) { updated = { ...c, status }; return updated; } return c; }));
+    if (updated) upsertContact(updated).catch(console.error);
   };
 
   const handleDeleteContact = (id: string) => {
-    const newData = contacts.filter(c => c.id !== id);
-    setContacts(newData);
-    save('contacts', newData);
+    setContacts(prev => prev.filter(c => c.id !== id));
+    deleteContact(id).catch(console.error);
   };
 
   const processExcelFile = async (file: File) => {
@@ -205,9 +188,8 @@ const App: React.FC = () => {
         };
       });
 
-      const updated = [...transactions, ...newTransactions];
-      setTransactions(updated);
-      save('transactions', updated);
+      setTransactions(prev => [...prev, ...newTransactions]);
+      upsertTransactions(newTransactions).catch(console.error);
     } catch (error) {
       console.error("Excel processing error:", error);
       alert("Failed to process Excel file. Please ensure it follows the ledger format.");
@@ -232,9 +214,9 @@ const App: React.FC = () => {
         allExtracted = [...allExtracted, ...extracted];
         setBankingProgress(Math.round(((i + 1) / files.length) * 100));
       }
-      const newData = [...bankTransactions, ...allExtracted.map(b => ({ ...b, createdAt: new Date().toISOString() }))];
-      setBankTransactions(newData);
-      save('bankTransactions', newData);
+      const extracted = allExtracted.map(b => ({ ...b }));
+      setBankTransactions(prev => [...prev, ...extracted]);
+      upsertBankTransactions(extracted).catch(console.error);
     } catch (err) { 
       setBankingStatus('Import error.'); 
     } finally { 
@@ -261,14 +243,13 @@ const App: React.FC = () => {
     };
     
     // Update Ledger
-    const updatedLedger = [...transactions, newExpense];
-    setTransactions(updatedLedger);
-    save('transactions', updatedLedger);
+    setTransactions(prev => [...prev, newExpense]);
+    upsertTransaction(newExpense).catch(console.error);
 
     // Update Bank
-    const updatedBank = bankTransactions.map(b => b.id === bankTx.id ? { ...b, matchedTransactionId: expenseId, category } : b);
-    setBankTransactions(updatedBank);
-    save('bankTransactions', updatedBank);
+    const updatedBankTx = { ...bankTx, matchedTransactionId: expenseId, category };
+    setBankTransactions(prev => prev.map(b => b.id === bankTx.id ? updatedBankTx : b));
+    upsertBankTransaction(updatedBankTx).catch(console.error);
   }, [transactions, bankTransactions]);
 
   const handleLinkBankToLedger = useCallback((bankId: string, ledgerIds: string[]) => {
@@ -278,27 +259,24 @@ const App: React.FC = () => {
     const type = bankItem.type === 'credit' ? 'client' : 'laila';
     
     // Update Bank
-    const updatedBank = bankTransactions.map(b => b.id === bankId ? { ...b, matchedTransactionId: ledgerIds.join(', ') } : b);
-    setBankTransactions(updatedBank);
-    save('bankTransactions', updatedBank);
-    
+    let updatedBt: BankTransaction | undefined;
+    setBankTransactions(prev => prev.map(b => { if (b.id === bankId) { updatedBt = { ...b, matchedTransactionId: ledgerIds.join(', ') }; return updatedBt; } return b; }));
+    if (updatedBt) upsertBankTransaction(updatedBt).catch(console.error);
+
     // Update Ledger
-    const updatedLedger = transactions.map(t => {
+    const updatedLedgerItems: Transaction[] = [];
+    setTransactions(prev => prev.map(t => {
       if (ledgerIds.includes(t.id)) {
         const updates: any = {};
-        if (type === 'client') {
-            updates.clientStatus = 'Paid';
-            updates.referenceNumber = bankId;
-        } else {
-            updates.ladlyStatus = 'Paid';
-            updates.paymentToLmRef = bankId;
-        }
-        return { ...t, ...updates };
+        if (type === 'client') { updates.clientStatus = 'Paid'; updates.referenceNumber = bankId; }
+        else { updates.ladlyStatus = 'Paid'; updates.paymentToLmRef = bankId; }
+        const u = { ...t, ...updates };
+        updatedLedgerItems.push(u);
+        return u;
       }
       return t;
-    });
-    setTransactions(updatedLedger);
-    save('transactions', updatedLedger);
+    }));
+    upsertTransactions(updatedLedgerItems).catch(console.error);
   }, [bankTransactions, transactions]);
 
   const autoDiscoveredCampaigns = useMemo(() => {
@@ -340,23 +318,21 @@ const App: React.FC = () => {
       activeTab={activeTab} setActiveTab={setActiveTab} isAnyProcessing={isProcessingExcel || isProcessingBanking || isSyncingZoho} 
       isAiOpen={isAiOpen} onToggleAi={() => setIsAiOpen(!isAiOpen)} onOpenSettings={() => setIsSettingsOpen(true)} onSignOut={handleSignOut} 
       entities={entities} activeEntity={activeEntity} onSwitchEntity={(id) => setCurrentEntityId(id)}
-      onCreateEntity={(n, l) => { 
-        const id = generateId(); 
-        const next = [...entities, { id, name: n, logo: l, initials: n.substring(0,2).toUpperCase(), color: 'bg-primary' }]; 
-        setEntities(next); 
-        save('entities', next); 
-      }} 
-      onUpdateEntity={(id, u) => { 
-        const next = entities.map(e => e.id === id ? {...e, ...u} : e); 
-        setEntities(next); 
-        save('entities', next); 
-      }} 
-      onDeleteEntity={(id) => { 
-        if (entities.length > 1) { 
-          const next = entities.filter(e => e.id !== id); 
-          setEntities(next); 
-          save('entities', next); 
-        } 
+      onCreateEntity={(n, l) => {
+        const entity = { id: generateId(), name: n, logo: l, initials: n.substring(0,2).toUpperCase(), color: 'bg-primary' };
+        setEntities(prev => [...prev, entity]);
+        upsertEntity(entity).catch(console.error);
+      }}
+      onUpdateEntity={(id, u) => {
+        let updated: Entity | undefined;
+        setEntities(prev => prev.map(e => { if (e.id === id) { updated = {...e, ...u}; return updated; } return e; }));
+        if (updated) upsertEntity(updated).catch(console.error);
+      }}
+      onDeleteEntity={(id) => {
+        if (entities.length > 1) {
+          setEntities(prev => prev.filter(e => e.id !== id));
+          deleteEntity(id).catch(console.error);
+        }
       }}
       ledgerCount={transactions.length} bankTxCount={bankTransactions.length}
     >
@@ -390,20 +366,19 @@ const App: React.FC = () => {
         <BankingComponent 
           bankTransactions={bankTransactions} transactions={transactions} 
           onUpdateBankTransaction={(bt) => {
-            const newData = bankTransactions.map(b => b.id === bt.id ? bt : b);
-            setBankTransactions(newData);
-            save('bankTransactions', newData);
-          }} 
-          onUpdateTransaction={handleUpdateTransaction} 
+            setBankTransactions(prev => prev.map(b => b.id === bt.id ? bt : b));
+            upsertBankTransaction(bt).catch(console.error);
+          }}
+          onUpdateTransaction={handleUpdateTransaction}
           onClearBankTransactions={() => {
-              setBankTransactions([]);
-              save('bankTransactions', []);
-          }} 
+            setBankTransactions([]);
+            clearBankTransactions().catch(console.error);
+          }}
           onAddExpenseFromBank={handleAddExpenseFromBank} onLinkBankToLedger={handleLinkBankToLedger}
           onUnlinkBank={(bankId) => {
-             const newData = bankTransactions.map(b => b.id === bankId ? { ...b, matchedTransactionId: undefined } : b);
-             setBankTransactions(newData);
-             save('bankTransactions', newData);
+            let updated: BankTransaction | undefined;
+            setBankTransactions(prev => prev.map(b => { if (b.id === bankId) { updated = { ...b, matchedTransactionId: undefined }; return updated; } return b; }));
+            if (updated) upsertBankTransaction(updated).catch(console.error);
           }}
           onStatementUpload={handleStatementUpload} 
           isProcessing={isProcessingBanking} progress={bankingProgress} statusMsg={bankingStatus} showAedEquivalent={showAedEquivalent} 
@@ -413,33 +388,34 @@ const App: React.FC = () => {
       {activeTab === 'campaigns' && (
         <CampaignTracker 
           transactions={transactions} campaigns={autoDiscoveredCampaigns} rateCard={parsedRateCardData} 
-          onUpdateCampaign={(n, m) => { 
-            const next = {...campaignMetadata, [n]: {...(campaignMetadata[n] || {}), ...m, projectName: n}}; 
-            setCampaignMetadata(next); 
-            save('campaignMetadata', next); 
-          }} 
+          onUpdateCampaign={(n, m) => {
+            const updated = {...(campaignMetadata[n] || {}), ...m, projectName: n} as Campaign;
+            setCampaignMetadata(prev => ({...prev, [n]: updated}));
+            upsertCampaign(updated).catch(console.error);
+          }}
           onMergeCampaigns={(sources, target) => {
             const sourcesWithoutTarget = sources.filter(s => s !== target);
-            const existingMetadata = campaignMetadata[target] || { projectName: target, files: [], deliverables: [], mergedSources: [] };
-            const newMergedSources = Array.from(new Set([...(existingMetadata.mergedSources || []), ...sourcesWithoutTarget]));
-            const next = { ...campaignMetadata, [target]: { ...existingMetadata, mergedSources: newMergedSources } };
-            setCampaignMetadata(next);
-            save('campaignMetadata', next);
-          }} 
-          onAddCampaign={(n) => { 
-            const next = {...campaignMetadata, [n]: {projectName: n}}; 
-            setCampaignMetadata(next); 
-            save('campaignMetadata', next); 
-          }} 
+            const existing = campaignMetadata[target] || { projectName: target, files: [], deliverables: [], mergedSources: [] };
+            const merged = { ...existing, mergedSources: Array.from(new Set([...(existing.mergedSources || []), ...sourcesWithoutTarget])) };
+            setCampaignMetadata(prev => ({...prev, [target]: merged}));
+            upsertCampaign(merged).catch(console.error);
+          }}
+          onAddCampaign={(n) => {
+            const c: Campaign = { projectName: n };
+            setCampaignMetadata(prev => ({...prev, [n]: c}));
+            upsertCampaign(c).catch(console.error);
+          }}
           onRenameCampaign={(oldN, newN) => {
-            const updatedTransactions = transactions.map(t => t.project === oldN ? { ...t, project: newN } : t);
-            setTransactions(updatedTransactions);
-            save('transactions', updatedTransactions);
-            
-            const next = {...campaignMetadata}; 
-            if (next[oldN]) { next[newN] = {...next[oldN], projectName: newN}; delete next[oldN]; }
-            setCampaignMetadata(next); 
-            save('campaignMetadata', next);
+            const renamedTxs: Transaction[] = [];
+            setTransactions(prev => prev.map(t => { if (t.project === oldN) { const u = { ...t, project: newN }; renamedTxs.push(u); return u; } return t; }));
+            upsertTransactions(renamedTxs).catch(console.error);
+            const oldCampaign = campaignMetadata[oldN];
+            if (oldCampaign) {
+              const renamed = { ...oldCampaign, projectName: newN };
+              setCampaignMetadata(prev => { const next = {...prev}; delete next[oldN]; next[newN] = renamed; return next; });
+              upsertCampaign(renamed).catch(console.error);
+              deleteCampaign(oldN).catch(console.error);
+            }
           }}
           selectedProjectName={null} setSelectedProjectName={() => {}} showAedEquivalent={showAedEquivalent} 
         />
@@ -456,44 +432,46 @@ const App: React.FC = () => {
       {activeTab === 'resources' && (
         <Resources 
           resources={resources} rateCardData={parsedRateCardData} 
-          onUpdateResources={(u) => { 
-            const next = {...resources, ...u}; 
-            setResources(next); 
-            save('resources', next); 
-          }} 
-          onUpdateRateCardData={(d) => { 
-            setParsedRateCardData(d); 
-            save('parsedRateCard', d); 
+          onUpdateResources={(u) => {
+            const next = {...resources, ...u};
+            setResources(next);
+            saveSetting('resources', next).catch(console.error);
+          }}
+          onUpdateRateCardData={(d) => {
+            setParsedRateCardData(d);
+            saveSetting('parsedRateCard', d).catch(console.error);
           }} 
         />
       )}
 
       <Settings 
         isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} config={zohoConfig} 
-        onSaveConfig={(c) => { setZohoConfig(c); save('zohoConfig', c); }} 
+        onSaveConfig={(c) => { setZohoConfig(c); saveSetting('zohoConfig', c).catch(console.error); }}
         onSync={async () => {
             setIsSyncingZoho(true);
             try {
                 const invoices = await fetchZohoInvoices(zohoConfig);
-                const combined = [...transactions];
-                invoices.forEach(inv => {
+                const toUpsert: Transaction[] = [];
+                setTransactions(prev => {
+                  const combined = [...prev];
+                  invoices.forEach(inv => {
                     const idx = combined.findIndex(t => t.id === inv.id);
-                    if (idx >= 0) combined[idx] = inv;
-                    else combined.push(inv);
+                    if (idx >= 0) combined[idx] = inv; else combined.push(inv);
+                    toUpsert.push(inv);
+                  });
+                  return combined;
                 });
-                setTransactions(combined);
-                save('transactions', combined);
-                
+                upsertTransactions(toUpsert).catch(console.error);
                 const nextConfig = { ...zohoConfig, lastSync: new Date().toLocaleString() };
-                setZohoConfig(nextConfig); 
-                save('zohoConfig', nextConfig);
+                setZohoConfig(nextConfig);
+                saveSetting('zohoConfig', nextConfig).catch(console.error);
             } finally { setIsSyncingZoho(false); }
-        }} 
-        isSyncing={isSyncingZoho} 
+        }}
+        isSyncing={isSyncingZoho}
         onClearData={() => {
             localStorage.clear();
             window.location.reload();
-        }} 
+        }}
         onExport={() => {
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
                 transactions, contacts, campaignMetadata, bankTransactions, resources, parsedRateCardData, zohoConfig
@@ -504,17 +482,20 @@ const App: React.FC = () => {
             document.body.appendChild(downloadAnchorNode);
             downloadAnchorNode.click();
             downloadAnchorNode.remove();
-        }} 
+        }}
         onImport={(file) => {
             const reader = new FileReader();
             reader.onload = (e) => {
                 try {
                     const data = JSON.parse(e.target?.result as string);
-                    if(data.transactions) { setTransactions(data.transactions); save('transactions', data.transactions); }
-                    if(data.contacts) { setContacts(data.contacts); save('contacts', data.contacts); }
-                    if(data.campaignMetadata) { setCampaignMetadata(data.campaignMetadata); save('campaignMetadata', data.campaignMetadata); }
-                    if(data.bankTransactions) { setBankTransactions(data.bankTransactions); save('bankTransactions', data.bankTransactions); }
-                    if(data.resources) { setResources(data.resources); save('resources', data.resources); }
+                    if (data.transactions) { setTransactions(data.transactions); upsertTransactions(data.transactions).catch(console.error); }
+                    if (data.contacts) { setContacts(data.contacts); data.contacts.forEach((c: Contact) => upsertContact(c).catch(console.error)); }
+                    if (data.campaignMetadata) {
+                      setCampaignMetadata(data.campaignMetadata);
+                      Object.values(data.campaignMetadata as Record<string, Campaign>).forEach(c => upsertCampaign(c).catch(console.error));
+                    }
+                    if (data.bankTransactions) { setBankTransactions(data.bankTransactions); upsertBankTransactions(data.bankTransactions).catch(console.error); }
+                    if (data.resources) { setResources(data.resources); saveSetting('resources', data.resources).catch(console.error); }
                     alert("Backup restored successfully.");
                 } catch(err) { alert("Invalid backup file."); }
             };
@@ -525,7 +506,7 @@ const App: React.FC = () => {
 
       <AIChat 
         isOpen={isAiOpen} onClose={() => setIsAiOpen(false)} transactions={transactions} contacts={contacts} campaigns={autoDiscoveredCampaigns} bankTransactions={bankTransactions} 
-        history={chatHistory} onUpdateHistory={(h) => { setChatHistory(h); save('chatHistory', h); }} onNavigateToCampaign={() => { setActiveTab('campaigns'); setIsAiOpen(false); }} 
+        history={chatHistory} onUpdateHistory={(h) => { setChatHistory(h); saveSetting('chatHistory', h).catch(console.error); }} onNavigateToCampaign={() => { setActiveTab('campaigns'); setIsAiOpen(false); }} 
         onUpdateLedgerStatus={(ids, field, status) => handleBulkUpdateTransactions(ids, { [field]: status })} 
         onReconcile={(pName, bId) => {
             const tx = transactions.find(t => t.project === pName);
