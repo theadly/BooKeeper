@@ -651,7 +651,7 @@ const App: React.FC = () => {
           isProcessing={isProcessingExcel} columnWidths={columnWidths} onColumnWidthChange={setColumnWidths} 
           columnLabels={columnLabels} onUpdateColumnLabel={(k, l) => setColumnLabels(p => ({...p, [k]: l}))} 
           showAedEquivalent={showAedEquivalent} bankTransactions={bankTransactions} 
-          onReconcile={(tId, bIds) => handleLinkBankToLedger(bIds[0], [tId])} 
+          onReconcile={(tId, bIds) => handleLinkBankToLedger(bIds[0], [tId])}
           onUnlink={(tId, type) => {
             const tx = transactions.find(t => t.id === tId);
             if (tx) {
@@ -660,7 +660,23 @@ const App: React.FC = () => {
                 else { updates.paymentToLmRef = undefined; updates.ladlyStatus = 'Pending'; }
                 handleUpdateTransaction({ ...tx, ...updates });
             }
-          }} 
+          }}
+          googleSheetsConfig={googleSheetsConfig}
+          onSaveGoogleSheetsConfig={(c) => { setGoogleSheetsConfig(c); saveSetting('googleSheetsConfig', c).catch(console.error); }}
+          onSyncSheets={handleSyncSheets}
+          isSyncingSheets={isSyncingSheets}
+          sheetSyncError={sheetSyncError}
+          onDeduplicate={async () => {
+            const { kept, removed } = deduplicateTransactions(transactions);
+            if (removed > 0) {
+              setTransactions(kept);
+              upsertTransactions(kept).catch(console.error);
+              const keptIds = new Set(kept.map(t => t.id));
+              const removedIds = transactions.filter(t => !keptIds.has(t.id)).map(t => t.id);
+              deleteTransactions(removedIds).catch(console.error);
+            }
+            return removed;
+          }}
         />
       )}
       {activeTab === 'banking' && (
@@ -825,23 +841,6 @@ const App: React.FC = () => {
             reader.readAsText(file);
         }} 
         theme={theme} onSetTheme={setTheme} isDarkMode={isDarkMode} onSetDarkMode={setIsDarkMode} fontSize={fontSize} onSetFontSize={setFontSize} showAedEquivalent={showAedEquivalent} onSetShowAedEquivalent={setShowAedEquivalent}
-        googleSheetsConfig={googleSheetsConfig}
-        onSaveGoogleSheetsConfig={(c) => { setGoogleSheetsConfig(c); saveSetting('googleSheetsConfig', c).catch(console.error); }}
-        onSyncSheets={handleSyncSheets}
-        isSyncingSheets={isSyncingSheets}
-        sheetSyncError={sheetSyncError}
-        onDeduplicate={async () => {
-          const { kept, removed } = deduplicateTransactions(transactions);
-          if (removed > 0) {
-            setTransactions(kept);
-            upsertTransactions(kept).catch(console.error);
-            // Remove the discarded ones from Supabase
-            const keptIds = new Set(kept.map(t => t.id));
-            const removedIds = transactions.filter(t => !keptIds.has(t.id)).map(t => t.id);
-            deleteTransactions(removedIds).catch(console.error);
-          }
-          return removed;
-        }}
       />
 
       <AIChat 

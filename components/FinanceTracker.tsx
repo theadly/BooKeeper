@@ -1,12 +1,14 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Transaction, TransactionType, Category, StatusOption, BankTransaction } from '../types';
+import { Transaction, TransactionType, Category, StatusOption, BankTransaction, GoogleSheetsConfig } from '../types';
 import {
   Plus, Search, Trash2, FileSpreadsheet, Edit, X, CheckSquare,
   Square, ChevronUp, ChevronDown, Undo2, Redo2, ArrowRight,
-  FileText, ShieldCheck, Package, Info
+  FileText, ShieldCheck, Package, Info, Sheet, RefreshCw, Link2,
+  CheckCircle, AlertTriangle, Copy, Zap
 } from 'lucide-react';
 import { CONFIG } from '../config';
 import { FINANCE_STATUS_OPTIONS, CATEGORY_OPTIONS, formatCurrency, formatDate } from '../constants';
+import { fetchSheetHeaders, autoDetectMapping, MAPPABLE_FIELDS } from '../services/googleSheetsService';
 
 interface FinanceTrackerProps {
   transactions: Transaction[];
@@ -29,6 +31,12 @@ interface FinanceTrackerProps {
   bankTransactions: BankTransaction[];
   onReconcile: (transactionId: string, bankIds: string[], type: 'client' | 'laila') => void;
   onUnlink: (transactionId: string, type: 'client' | 'laila') => void;
+  googleSheetsConfig: GoogleSheetsConfig;
+  onSaveGoogleSheetsConfig: (config: GoogleSheetsConfig) => void;
+  onSyncSheets: () => Promise<{ added: number; updated: number; skipped: number } | void>;
+  isSyncingSheets: boolean;
+  sheetSyncError?: string | null;
+  onDeduplicate: () => Promise<number>;
 }
 
 interface SortConfig { key: string; direction: 'asc' | 'desc' | null; }
@@ -37,7 +45,8 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
   transactions, onAddTransaction, onUpdateTransaction, onBulkUpdateTransactions,
   onDeleteTransaction, onBulkDeleteTransactions, onExcelImport,
   onUndo, onRedo, canUndo, canRedo, isProcessing,
-  columnWidths, onColumnWidthChange, columnLabels, showAedEquivalent, bankTransactions, onReconcile, onUnlink
+  columnWidths, onColumnWidthChange, columnLabels, showAedEquivalent, bankTransactions, onReconcile, onUnlink,
+  googleSheetsConfig, onSaveGoogleSheetsConfig, onSyncSheets, isSyncingSheets, sheetSyncError, onDeduplicate
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [yearFilter, setYearFilter] = useState<string[]>([]);
@@ -49,6 +58,51 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
   const [selectedDetailId, setSelectedDetailId] = useState<string | null>(null);
   const [isYearDropdownOpen, setIsYearDropdownOpen] = useState(false);
   const yearDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Google Sheets panel state
+  const [isSheetPanelOpen, setIsSheetPanelOpen] = useState(false);
+  const [sheetUrl, setSheetUrl] = useState(googleSheetsConfig?.sheetUrl ?? '');
+  const [sheetMapping, setSheetMapping] = useState<Record<string, string>>(googleSheetsConfig?.columnMapping ?? {});
+  const [sheetAutoSync, setSheetAutoSync] = useState(googleSheetsConfig?.autoSync ?? false);
+  const [sheetHeaders, setSheetHeaders] = useState<string[]>([]);
+  const [detectingHeaders, setDetectingHeaders] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
+  const [sheetsDetected, setSheetsDetected] = useState(Object.keys(googleSheetsConfig?.columnMapping ?? {}).length > 0);
+  const [sheetSyncResult, setSheetSyncResult] = useState<{ added: number; updated: number; skipped: number } | null>(null);
+  const [dedupeStatus, setDedupeStatus] = useState<'idle' | 'running' | 'done'>('idle');
+  const [dedupeCount, setDedupeCount] = useState(0);
+  const sheetPanelRef = useRef<HTMLDivElement>(null);
+
+  const isSheetsConnected = !!(googleSheetsConfig?.sheetUrl && Object.keys(googleSheetsConfig?.columnMapping ?? {}).length > 0);
+
+  // Sync local sheet state when config changes (e.g. after load from DB)
+  useEffect(() => {
+    if (googleSheetsConfig) {
+      setSheetUrl(googleSheetsConfig.sheetUrl ?? '');
+      setSheetMapping(googleSheetsConfig.columnMapping ?? {});
+      setSheetAutoSync(googleSheetsConfig.autoSync ?? false);
+      if (googleSheetsConfig.sheetUrl && Object.keys(googleSheetsConfig.columnMapping ?? {}).length > 0) {
+        setSheetsDetected(true);
+      }
+    }
+  }, [googleSheetsConfig]);
+
+  const handleDetectColumns = async () => {
+    if (!sheetUrl.trim()) return;
+    setDetectingHeaders(true);
+    setDetectError(null);
+    setSheetsDetected(false);
+    const { headers, error } = await fetchSheetHeaders(sheetUrl.trim());
+    setDetectingHeaders(false);
+    if (error) { setDetectError(error); return; }
+    setSheetHeaders(headers);
+    setSheetMapping(autoDetectMapping(headers));
+    setSheetsDetected(true);
+  };
+
+  const handleSaveSheetConfig = () => {
+    onSaveGoogleSheetsConfig({ sheetUrl, columnMapping: sheetMapping, autoSync: sheetAutoSync, lastSync: googleSheetsConfig?.lastSync });
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const newMenuRef = useRef<HTMLDivElement>(null);
@@ -282,8 +336,157 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
               )}
             </div>
           )}
+
+          {/* Google Sheets sync button */}
+          <button
+            onClick={() => setIsSheetPanelOpen(v => !v)}
+            title="Google Sheets Sync"
+            className={`flex items-center gap-1.5 px-3 h-[38px] rounded-full text-[11px] font-semibold uppercase tracking-wide border transition-all shrink-0 ${isSheetPanelOpen ? 'bg-emerald-600 text-white border-emerald-600' : isSheetsConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-surface-container text-on-surface-variant border-surface-container-high hover:text-on-background'}`}
+          >
+            {isSyncingSheets ? <RefreshCw size={14} className="animate-spin" /> : <Sheet size={14} />}
+            <span className="hidden sm:inline">{isSheetsConnected ? 'Sheet' : 'Connect Sheet'}</span>
+            {isSheetsConnected && <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />}
+          </button>
+
+          {/* Deduplicate button */}
+          <button
+            onClick={async () => {
+              setDedupeStatus('running');
+              const removed = await onDeduplicate();
+              setDedupeCount(removed);
+              setDedupeStatus('done');
+              setTimeout(() => setDedupeStatus('idle'), 3500);
+            }}
+            disabled={dedupeStatus === 'running'}
+            title="Find & Remove Duplicates"
+            className="flex items-center gap-1.5 px-3 h-[38px] rounded-full text-[11px] font-semibold uppercase tracking-wide border border-surface-container-high bg-surface-container text-on-surface-variant hover:text-on-background transition-all shrink-0 disabled:opacity-50"
+          >
+            <Copy size={13} className={dedupeStatus === 'running' ? 'animate-spin' : ''} />
+            <span className="hidden sm:inline">
+              {dedupeStatus === 'running' ? 'Scanning...' : dedupeStatus === 'done' ? (dedupeCount > 0 ? `${dedupeCount} removed` : 'Clean') : 'Dedup'}
+            </span>
+          </button>
         </div>
       </div>
+
+      {/* Google Sheets Panel */}
+      {isSheetPanelOpen && (
+        <div ref={sheetPanelRef} className="shrink-0 px-6 py-4 border-b border-surface-container bg-surface-container-low/50 animate-in slide-in-from-top-2 duration-200 z-[900]">
+          <div className="flex items-start gap-4 flex-wrap">
+            {/* URL + Detect */}
+            <div className="flex-1 min-w-[280px] space-y-2">
+              <p className="text-[9px] font-medium text-on-surface-variant uppercase tracking-widest">Google Sheet URL</p>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Link2 size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
+                  <input
+                    type="url"
+                    placeholder="https://docs.google.com/spreadsheets/d/..."
+                    className="w-full bg-surface-container-lowest border border-surface-container rounded-lg pl-8 pr-3 py-2 text-xs font-medium text-on-background outline-none focus:ring-2 focus:ring-primary/20"
+                    value={sheetUrl}
+                    onChange={e => { setSheetUrl(e.target.value); setSheetsDetected(false); setDetectError(null); }}
+                  />
+                </div>
+                <button
+                  onClick={handleDetectColumns}
+                  disabled={detectingHeaders || !sheetUrl.trim()}
+                  className="px-3 py-2 bg-primary text-on-primary rounded-lg text-[10px] font-medium uppercase tracking-wide disabled:opacity-50 shrink-0 hover:bg-primary-dim transition-colors"
+                >
+                  {detectingHeaders ? <RefreshCw size={11} className="animate-spin" /> : 'Detect'}
+                </button>
+              </div>
+              {detectError && (
+                <p className="text-[9px] text-error flex items-center gap-1"><AlertTriangle size={10}/> {detectError}</p>
+              )}
+              <p className="text-[8px] text-on-surface-variant">Sheet must be shared — <strong>Anyone with the link can view</strong></p>
+            </div>
+
+            {/* Column mapping (shown after detect) */}
+            {(sheetsDetected && sheetHeaders.length > 0) && (
+              <div className="flex-1 min-w-[240px] space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-[9px] font-medium text-on-surface-variant uppercase tracking-widest">Column Mapping</p>
+                  <span className={`text-[8px] font-semibold px-2 py-0.5 rounded-full ${Object.keys(sheetMapping).length >= 3 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {Object.keys(sheetMapping).length}/{MAPPABLE_FIELDS.length} detected
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                  {MAPPABLE_FIELDS.map(({ key, label, required }) => (
+                    <div key={key} className="flex items-center gap-1.5">
+                      <span className={`text-[8px] w-20 shrink-0 ${required ? 'font-semibold text-on-background' : 'text-on-surface-variant'}`}>{label}{required ? '*' : ''}</span>
+                      <select
+                        value={sheetMapping[key] || ''}
+                        onChange={e => setSheetMapping(prev => ({ ...prev, [key]: e.target.value }))}
+                        className="flex-1 bg-surface-container border border-surface-container rounded px-1.5 py-1 text-[9px] font-medium text-on-background outline-none min-w-0"
+                      >
+                        <option value="">—</option>
+                        {sheetHeaders.map(h => <option key={h} value={h}>{h}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex flex-col gap-2 shrink-0 min-w-[160px]">
+              {/* Auto-sync toggle */}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[9px] font-medium text-on-surface-variant uppercase tracking-widest">Auto-sync on load</span>
+                <button
+                  type="button"
+                  onClick={() => setSheetAutoSync(v => !v)}
+                  className={`relative w-9 h-4 rounded-full transition-colors shrink-0 ${sheetAutoSync ? 'bg-emerald-500' : 'bg-surface-container-high'}`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${sheetAutoSync ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+
+              <button
+                onClick={() => { handleSaveSheetConfig(); }}
+                className="flex items-center justify-center gap-1.5 px-4 py-2 bg-surface-container border border-surface-container-high rounded-lg text-[10px] font-medium uppercase tracking-wide text-on-background hover:bg-surface-container-high transition-colors"
+              >
+                <CheckCircle size={12} /> Save Config
+              </button>
+
+              <button
+                onClick={async () => {
+                  handleSaveSheetConfig();
+                  setSheetSyncResult(null);
+                  const result = await onSyncSheets();
+                  if (result) setSheetSyncResult(result);
+                }}
+                disabled={isSyncingSheets || (!sheetsDetected && !isSheetsConnected)}
+                className="flex items-center justify-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-lg text-[10px] font-medium uppercase tracking-wide hover:bg-emerald-700 transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={isSyncingSheets ? 'animate-spin' : ''} />
+                {isSyncingSheets ? 'Syncing...' : 'Sync Now'}
+              </button>
+
+              {/* Result / status */}
+              {sheetSyncResult && !sheetSyncError && (
+                <p className="text-[9px] text-emerald-700 font-medium flex items-center gap-1">
+                  <CheckCircle size={10}/> {sheetSyncResult.added} added · {sheetSyncResult.updated} updated
+                </p>
+              )}
+              {sheetSyncError && (
+                <p className="text-[9px] text-error font-medium flex items-center gap-1">
+                  <AlertTriangle size={10}/> {sheetSyncError}
+                </p>
+              )}
+              {isSheetsConnected && googleSheetsConfig.lastSync && (
+                <p className="text-[8px] text-on-surface-variant">Last sync: {new Date(googleSheetsConfig.lastSync).toLocaleString()}</p>
+              )}
+              {isSheetsConnected && googleSheetsConfig.autoSync && (
+                <div className="flex items-center gap-1">
+                  <Zap size={9} className="text-emerald-600" />
+                  <span className="text-[8px] font-semibold text-emerald-600 uppercase">Auto-sync enabled</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Summary Bar */}
       {sortedTransactions.length > 0 && (
