@@ -17,7 +17,7 @@ import {
 } from './types';
 import { RATE_CARD_SERVICES } from './constants';
 import { parseBankStatement } from './services/geminiService';
-import { fetchZohoInvoices, mergeZohoInvoice, refreshZohoToken } from './services/zohoService';
+import { fetchZohoInvoices, mergeZohoInvoice, refreshZohoToken, sendZohoInvoice, markZohoInvoicePaid, createZohoInvoice, getZohoInvoiceUrl } from './services/zohoService';
 import { syncSheetToTransactions, deduplicateTransactions } from './services/googleSheetsService';
 import {
   supabase,
@@ -282,6 +282,25 @@ const App: React.FC = () => {
   const handleBulkDeleteTransactions = (ids: string[]) => {
     setTransactions(prev => prev.filter(t => !ids.includes(t.id)));
     deleteTransactions(ids).catch(console.error);
+  };
+
+  const handleZohoSendInvoice = async (t: Transaction) => {
+    if (!zohoConfig.accessToken || !t.zohoInvoiceId) return;
+    await sendZohoInvoice(zohoConfig, t.zohoInvoiceId);
+    handleUpdateTransaction({ ...t, clientStatus: 'Unpaid' });
+  };
+
+  const handleZohoMarkPaid = async (t: Transaction) => {
+    if (!zohoConfig.accessToken || !t.zohoInvoiceId) return;
+    const today = new Date().toISOString().split('T')[0];
+    await markZohoInvoicePaid(zohoConfig, t.zohoInvoiceId, t.amount, today);
+    handleUpdateTransaction({ ...t, clientStatus: 'Paid' });
+  };
+
+  const handleZohoCreateInvoice = async (t: Transaction) => {
+    if (!zohoConfig.accessToken) return;
+    const { invoiceId, invoiceNumber } = await createZohoInvoice(zohoConfig, t);
+    handleUpdateTransaction({ ...t, zohoInvoiceId: invoiceId, invoiceNumber: invoiceNumber || t.invoiceNumber });
   };
 
   const handleAddContact = (c: Contact) => {
@@ -695,6 +714,11 @@ const App: React.FC = () => {
             }
             return removed;
           }}
+          zohoOrgId={zohoConfig.organizationId}
+          zohoConnected={!!(zohoConfig.refreshToken && zohoConfig.organizationId)}
+          onZohoSendInvoice={handleZohoSendInvoice}
+          onZohoMarkPaid={handleZohoMarkPaid}
+          onZohoCreateInvoice={handleZohoCreateInvoice}
         />
       )}
       {activeTab === 'banking' && (

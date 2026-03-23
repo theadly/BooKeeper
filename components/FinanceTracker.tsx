@@ -4,7 +4,7 @@ import {
   Plus, Search, Trash2, FileSpreadsheet, Edit, X, CheckSquare,
   Square, ChevronUp, ChevronDown, Undo2, Redo2, ArrowRight,
   FileText, ShieldCheck, Package, Info, Sheet, RefreshCw, Link2,
-  CheckCircle, AlertTriangle, Copy, Zap
+  CheckCircle, AlertTriangle, Copy, Zap, ExternalLink, Send, BadgeCheck
 } from 'lucide-react';
 import { CONFIG } from '../config';
 import { FINANCE_STATUS_OPTIONS, CATEGORY_OPTIONS, formatCurrency, formatDate } from '../constants';
@@ -37,6 +37,11 @@ interface FinanceTrackerProps {
   isSyncingSheets: boolean;
   sheetSyncError?: string | null;
   onDeduplicate: () => Promise<number>;
+  zohoOrgId?: string;
+  zohoConnected?: boolean;
+  onZohoSendInvoice?: (t: Transaction) => Promise<void>;
+  onZohoMarkPaid?: (t: Transaction) => Promise<void>;
+  onZohoCreateInvoice?: (t: Transaction) => Promise<void>;
 }
 
 interface SortConfig { key: string; direction: 'asc' | 'desc' | null; }
@@ -46,7 +51,8 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
   onDeleteTransaction, onBulkDeleteTransactions, onExcelImport,
   onUndo, onRedo, canUndo, canRedo, isProcessing,
   columnWidths, onColumnWidthChange, columnLabels, showAedEquivalent, bankTransactions, onReconcile, onUnlink,
-  googleSheetsConfig, onSaveGoogleSheetsConfig, onSyncSheets, isSyncingSheets, sheetSyncError, onDeduplicate
+  googleSheetsConfig, onSaveGoogleSheetsConfig, onSyncSheets, isSyncingSheets, sheetSyncError, onDeduplicate,
+  zohoOrgId, zohoConnected, onZohoSendInvoice, onZohoMarkPaid, onZohoCreateInvoice
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [yearFilter, setYearFilter] = useState<string[]>([]);
@@ -531,7 +537,7 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
                       {selectedIds.size > 0 ? <CheckSquare size={15} className="text-primary"/> : <Square size={15} className="text-on-surface-variant"/>}
                     </button>
                   </th>
-                  <th className={`${thBase} left-[40px] w-[64px]`}></th>
+                  <th className={`${thBase} left-[40px] w-[120px]`}></th>
                   <ResizableTh colKey="year" label="Year" style={{ left: `104px` }} />
                   <ResizableTh colKey="project" label="Project" style={{ left: `${stickyX.project}px` }} />
                   <ResizableTh colKey="client" label="Client" />
@@ -572,11 +578,36 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
                       {selectedIds.has(t.id) ? <CheckSquare size={15} className="text-primary"/> : <Square size={15} className="text-on-surface-variant opacity-0 group-hover:opacity-100"/>}
                     </td>
                     {/* Actions */}
-                    <td className={`${tdStickyBase} px-1 text-center left-[40px] w-[64px]`}>
+                    <td className={`${tdStickyBase} px-1 text-center left-[40px] w-[120px]`}>
                       <div className="flex items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={(e) => { e.stopPropagation(); setFormData(t); setEditingId(t.id); setIsModalOpen(true); }} className="p-1.5 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-lg transition-all" title="Edit"><Edit size={13}/></button>
                         <button onClick={(e) => handleDelete(t.id, e)} className="p-1.5 text-on-surface-variant hover:text-error hover:bg-error/10 rounded-lg transition-all" title="Delete"><Trash2 size={13}/></button>
                         <button onClick={(e) => { e.stopPropagation(); setSelectedDetailId(t.id); }} className={`p-1.5 rounded-lg transition-all ${(t.referenceNumber || t.paymentToLmRef) ? 'text-primary' : 'text-on-surface-variant hover:text-primary hover:bg-primary/10'}`} title="Details"><Info size={13}/></button>
+                        {zohoConnected && (
+                          <>
+                            {t.zohoInvoiceId && (
+                              <>
+                                <button
+                                  onClick={async (e) => { e.stopPropagation(); try { await onZohoSendInvoice?.(t); } catch(err: any) { alert(err.message); } }}
+                                  className="p-1.5 text-on-surface-variant hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                                  title="Send invoice via Zoho"
+                                ><Send size={12}/></button>
+                                <button
+                                  onClick={async (e) => { e.stopPropagation(); try { await onZohoMarkPaid?.(t); } catch(err: any) { alert(err.message); } }}
+                                  className="p-1.5 text-on-surface-variant hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
+                                  title="Mark as paid in Zoho"
+                                ><BadgeCheck size={12}/></button>
+                              </>
+                            )}
+                            {!t.zohoInvoiceId && t.type === TransactionType.INCOME && (
+                              <button
+                                onClick={async (e) => { e.stopPropagation(); try { await onZohoCreateInvoice?.(t); } catch(err: any) { alert(err.message); } }}
+                                className="p-1.5 text-on-surface-variant hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
+                                title="Create invoice in Zoho"
+                              ><Zap size={12}/></button>
+                            )}
+                          </>
+                        )}
                       </div>
                     </td>
                     {/* Year */}
@@ -591,7 +622,21 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
                     {/* Client */}
                     <td className="px-5 py-3 text-on-surface-variant font-medium truncate max-w-[180px] border-r border-surface-container">{t.customerName || '—'}</td>
                     {/* INV # */}
-                    <td className="px-5 py-3 font-mono text-[11px] font-semibold text-primary border-r border-surface-container">{t.invoiceNumber || '—'}</td>
+                    <td className="px-5 py-3 font-mono text-[11px] font-semibold text-primary border-r border-surface-container">
+                      {t.invoiceNumber && t.zohoInvoiceId && zohoOrgId ? (
+                        <a
+                          href={`https://books.zoho.com/app/${zohoOrgId}#/invoices/${t.zohoInvoiceId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          className="flex items-center gap-1 hover:text-primary-dim transition-colors group/inv"
+                          title="Open in Zoho Books"
+                        >
+                          {t.invoiceNumber}
+                          <ExternalLink size={10} className="opacity-0 group-hover/inv:opacity-100 transition-opacity" />
+                        </a>
+                      ) : t.invoiceNumber || '—'}
+                    </td>
                     {/* Client Status */}
                     <td className="px-3 py-3 text-center min-w-[140px] border-r border-surface-container" onClick={e => e.stopPropagation()}>
                       <select className={`w-full px-2 py-1.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border transition-all cursor-pointer outline-none appearance-none text-center ${getStatusStyle(t.clientStatus)}`} value={t.clientStatus} onChange={(e) => handleUpdateStatus(t.id, 'clientStatus', e.target.value as StatusOption)}>

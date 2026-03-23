@@ -134,3 +134,53 @@ export const fetchZohoInvoices = async (config: ZohoConfig): Promise<Transaction
     throw error;
   }
 };
+
+/** Build the direct URL to view an invoice in Zoho Books */
+export const getZohoInvoiceUrl = (orgId: string, invoiceId: string): string =>
+  `https://books.zoho.com/app/${orgId}#/invoices/${invoiceId}`;
+
+/** Send a draft/unsent invoice to the client via Zoho */
+export const sendZohoInvoice = async (config: ZohoConfig, invoiceId: string): Promise<void> => {
+  const res = await fetch(
+    `${getBaseUrl()}/books/v3/invoices/${invoiceId}/status/sent?organization_id=${config.organizationId}`,
+    { method: 'POST', headers: { 'Authorization': `Zoho-oauthtoken ${config.accessToken}` } }
+  );
+  const data = await res.json();
+  if (!res.ok || data.code !== 0) throw new Error(data.message || res.statusText);
+};
+
+/** Record a payment against an invoice in Zoho */
+export const markZohoInvoicePaid = async (
+  config: ZohoConfig, invoiceId: string, amount: number, date: string
+): Promise<void> => {
+  const res = await fetch(
+    `${getBaseUrl()}/books/v3/invoices/${invoiceId}/payments?organization_id=${config.organizationId}`,
+    {
+      method: 'POST',
+      headers: { 'Authorization': `Zoho-oauthtoken ${config.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ invoice_id: invoiceId, invoice_payment_amount: amount, date, payment_mode: 'bank_transfer' }),
+    }
+  );
+  const data = await res.json();
+  if (!res.ok || data.code !== 0) throw new Error(data.message || res.statusText);
+};
+
+/** Create a new invoice in Zoho from a BooKeeper transaction */
+export const createZohoInvoice = async (config: ZohoConfig, t: Transaction): Promise<{ invoiceId: string; invoiceNumber: string }> => {
+  const body = {
+    customer_name: t.customerName || t.project,
+    date: t.date,
+    line_items: [{ description: t.project, rate: t.amount, quantity: 1 }],
+  };
+  const res = await fetch(
+    `${getBaseUrl()}/books/v3/invoices?organization_id=${config.organizationId}`,
+    {
+      method: 'POST',
+      headers: { 'Authorization': `Zoho-oauthtoken ${config.accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }
+  );
+  const data = await res.json();
+  if (!res.ok || data.code !== 0) throw new Error(data.message || res.statusText);
+  return { invoiceId: data.invoice.invoice_id, invoiceNumber: data.invoice.invoice_number };
+};
