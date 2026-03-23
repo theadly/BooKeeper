@@ -138,7 +138,8 @@ const App: React.FC = () => {
   // Auto-sync with Zoho on load when credentials are available
   const hasAutoSynced = React.useRef(false);
   useEffect(() => {
-    if (hasAutoSynced.current || !zohoConfig.accessToken || !zohoConfig.organizationId || isSyncingZoho) return;
+    const hasZohoCreds = !!(zohoConfig.organizationId && (zohoConfig.accessToken || zohoConfig.refreshToken));
+    if (hasAutoSynced.current || !hasZohoCreds || isSyncingZoho) return;
     hasAutoSynced.current = true;
 
     const autoSync = async () => {
@@ -182,7 +183,7 @@ const App: React.FC = () => {
       } finally { setIsSyncingZoho(false); }
     };
     autoSync();
-  }, [zohoConfig.accessToken, zohoConfig.organizationId]);
+  }, [zohoConfig.refreshToken, zohoConfig.organizationId]);
 
   // Auto-sync Google Sheet on load when autoSync is enabled
   const hasAutoSyncedSheets = React.useRef(false);

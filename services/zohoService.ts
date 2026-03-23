@@ -39,7 +39,7 @@ export const mergeZohoInvoice = (incoming: Transaction, existing: Transaction): 
 };
 
 export const fetchZohoContacts = async (config: ZohoConfig): Promise<Contact[]> => {
-  if (!config.accessToken || !config.organizationId) return [];
+  if (!config.organizationId || !config.accessToken) return [];
 
   try {
     const response = await fetch(`${getBaseUrl()}/books/v3/contacts?organization_id=${config.organizationId}`, {
@@ -77,7 +77,8 @@ export const fetchZohoContacts = async (config: ZohoConfig): Promise<Contact[]> 
 };
 
 export const fetchZohoInvoices = async (config: ZohoConfig): Promise<Transaction[]> => {
-  if (!config.accessToken || !config.organizationId) return [];
+  if (!config.organizationId) return [];
+  if (!config.accessToken) { console.warn('fetchZohoInvoices: no accessToken'); return []; }
 
   try {
     // Note: In a production app, we'd handle multiple pages. Zoho default is 200 per page.
