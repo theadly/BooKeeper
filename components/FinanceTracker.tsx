@@ -4,7 +4,7 @@ import {
   Plus, Search, Trash2, FileSpreadsheet, Edit, X, CheckSquare,
   Square, ChevronUp, ChevronDown, Undo2, Redo2, ArrowRight,
   FileText, ShieldCheck, Package, Info, Sheet, RefreshCw, Link2,
-  CheckCircle, AlertTriangle, Copy, Zap, ExternalLink, Send, BadgeCheck
+  CheckCircle, AlertTriangle, Copy, Zap, ExternalLink, Send, BadgeCheck, Columns
 } from 'lucide-react';
 import { CONFIG } from '../config';
 import { FINANCE_STATUS_OPTIONS, CATEGORY_OPTIONS, formatCurrency, formatDate } from '../constants';
@@ -112,9 +112,43 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const newMenuRef = useRef<HTMLDivElement>(null);
+  const colMenuRef = useRef<HTMLDivElement>(null);
   const resizingCol = useRef<{ key: string; startX: number; startWidth: number } | null>(null);
 
-  const stickyX = { check: 0, actions: 40, year: 104, project: 104 + (columnWidths.year || 72) };
+  // actions col is 120px → year starts at 40+120=160
+  const stickyX = { check: 0, actions: 40, year: 160, project: 160 + (columnWidths.year || 72) };
+
+  // Column visibility — persisted in localStorage
+  const [hiddenColumns, setHiddenColumns] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem('bk_hiddenCols') || '[]')); } catch { return new Set(); }
+  });
+  const [isColMenuOpen, setIsColMenuOpen] = useState(false);
+
+  const toggleColumn = (key: string) => {
+    setHiddenColumns(prev => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      localStorage.setItem('bk_hiddenCols', JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  const TOGGLEABLE_COLS = [
+    { key: 'year', label: 'Year' },
+    { key: 'client', label: 'Client' },
+    { key: 'inv', label: 'INV #' },
+    { key: 'cStatus', label: 'Client Status' },
+    { key: 'lStatus', label: 'Ladly Status' },
+    { key: 'amount', label: 'Invoice Amount' },
+    { key: 'vat', label: 'VAT' },
+    { key: 'net', label: 'Net' },
+    { key: 'fee', label: 'Fee' },
+    { key: 'payable', label: 'To Laila' },
+    { key: 'paid', label: 'LM Transfer' },
+    { key: 'paymentDate', label: 'Date Paid' },
+  ];
+
+  const visibleColCount = 3 + TOGGLEABLE_COLS.filter(c => !hiddenColumns.has(c.key)).length; // 3 = check + actions + project (always visible)
 
   const initialFormData: Partial<Transaction> = {
     year: new Date().getFullYear(),
@@ -136,6 +170,7 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
     const h = (e: MouseEvent) => {
       if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node)) setIsNewMenuOpen(false);
       if (yearDropdownRef.current && !yearDropdownRef.current.contains(e.target as Node)) setIsYearDropdownOpen(false);
+      if (colMenuRef.current && !colMenuRef.current.contains(e.target as Node)) setIsColMenuOpen(false);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
@@ -372,6 +407,32 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
               {dedupeStatus === 'running' ? 'Scanning...' : dedupeStatus === 'done' ? (dedupeCount > 0 ? `${dedupeCount} removed` : 'Clean') : 'Dedup'}
             </span>
           </button>
+
+          {/* Columns visibility toggle */}
+          <div className="relative shrink-0" ref={colMenuRef}>
+            <button
+              onClick={() => setIsColMenuOpen(v => !v)}
+              className={`flex items-center gap-1.5 px-3 h-[38px] rounded-full text-[11px] font-semibold uppercase tracking-wide border transition-all ${hiddenColumns.size > 0 ? 'bg-primary/10 text-primary border-primary/30' : 'bg-surface-container text-on-surface-variant border-surface-container-high hover:text-on-background'}`}
+              title="Show/hide columns"
+            >
+              <Columns size={13} />
+              <span className="hidden sm:inline">Columns{hiddenColumns.size > 0 ? ` (${TOGGLEABLE_COLS.length - hiddenColumns.size}/${TOGGLEABLE_COLS.length})` : ''}</span>
+            </button>
+            {isColMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 bg-surface-container-lowest border border-surface-container rounded-xl shadow-lg z-[999] min-w-[180px] py-1.5 animate-in fade-in slide-in-from-top-2">
+                <div className="px-4 py-2 border-b border-surface-container flex items-center justify-between">
+                  <span className="text-[10px] font-semibold text-on-surface-variant uppercase tracking-wider">Columns</span>
+                  <button onClick={() => { setHiddenColumns(new Set()); localStorage.setItem('bk_hiddenCols', '[]'); }} className="text-[10px] text-primary hover:underline">Reset</button>
+                </div>
+                {TOGGLEABLE_COLS.map(({ key, label }) => (
+                  <button key={key} onClick={() => toggleColumn(key)} className="w-full px-4 py-2 text-left text-[11px] font-medium flex items-center gap-2 transition-colors hover:bg-surface-container-low">
+                    {hiddenColumns.has(key) ? <Square size={12} className="text-outline-variant" /> : <CheckSquare size={12} className="text-primary" />}
+                    <span className={hiddenColumns.has(key) ? 'text-on-surface-variant line-through' : 'text-on-background'}>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -538,25 +599,25 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
                     </button>
                   </th>
                   <th className={`${thBase} left-[40px] w-[120px]`}></th>
-                  <ResizableTh colKey="year" label="Year" style={{ left: `104px` }} />
+                  {!hiddenColumns.has('year') && <ResizableTh colKey="year" label="Year" style={{ left: `${stickyX.year}px`, zIndex: 250 }} />}
                   <ResizableTh colKey="project" label="Project" style={{ left: `${stickyX.project}px` }} />
-                  <ResizableTh colKey="client" label="Client" />
-                  <ResizableTh colKey="inv" label="Inv #" />
-                  <ResizableTh colKey="cStatus" align="center" label="Client Status" />
-                  <ResizableTh colKey="lStatus" align="center" label="Ladly Status" />
-                  <ResizableTh colKey="amount" align="right" label="Invoice Amount" />
-                  <ResizableTh colKey="vat" align="right" label="VAT" />
-                  <ResizableTh colKey="net" align="right" label="Net" />
-                  <ResizableTh colKey="fee" align="right" label="Fee" />
-                  <ResizableTh colKey="payable" align="right" label="To Laila" />
-                  <ResizableTh colKey="paid" align="right" label="LM Transfer" />
-                  <ResizableTh colKey="paymentDate" align="center" label="Date Paid" />
+                  {!hiddenColumns.has('client') && <ResizableTh colKey="client" label="Client" />}
+                  {!hiddenColumns.has('inv') && <ResizableTh colKey="inv" label="Inv #" />}
+                  {!hiddenColumns.has('cStatus') && <ResizableTh colKey="cStatus" align="center" label="Client Status" />}
+                  {!hiddenColumns.has('lStatus') && <ResizableTh colKey="lStatus" align="center" label="Ladly Status" />}
+                  {!hiddenColumns.has('amount') && <ResizableTh colKey="amount" align="right" label="Invoice Amount" />}
+                  {!hiddenColumns.has('vat') && <ResizableTh colKey="vat" align="right" label="VAT" />}
+                  {!hiddenColumns.has('net') && <ResizableTh colKey="net" align="right" label="Net" />}
+                  {!hiddenColumns.has('fee') && <ResizableTh colKey="fee" align="right" label="Fee" />}
+                  {!hiddenColumns.has('payable') && <ResizableTh colKey="payable" align="right" label="To Laila" />}
+                  {!hiddenColumns.has('paid') && <ResizableTh colKey="paid" align="right" label="LM Transfer" />}
+                  {!hiddenColumns.has('paymentDate') && <ResizableTh colKey="paymentDate" align="center" label="Date Paid" />}
                 </tr>
               </thead>
               <tbody className="text-[12px]">
                 {sortedTransactions.length === 0 ? (
                   <tr>
-                    <td colSpan={15} className="py-24 text-center">
+                    <td colSpan={visibleColCount} className="py-24 text-center">
                       <div className="flex flex-col items-center gap-4">
                         <div className="w-14 h-14 rounded-xl bg-surface-container flex items-center justify-center text-on-surface-variant">
                           <FileText size={24} />
@@ -611,8 +672,8 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
                       </div>
                     </td>
                     {/* Year */}
-                    <td className={`${tdStickyBase} px-4 text-on-surface-variant font-medium`} style={{ left: `104px` }}>{t.year}</td>
-                    {/* Project */}
+                    {!hiddenColumns.has('year') && <td className={`${tdStickyBase} px-4 text-on-surface-variant font-medium`} style={{ left: `${stickyX.year}px` }}>{t.year}</td>}
+                    {/* Project — always visible */}
                     <td className={`${tdStickyBase} px-5 truncate`} style={{ left: `${stickyX.project}px`, width: columnWidths.project || 200 }}>
                       <div className="flex items-center gap-2 truncate">
                         <span className="font-semibold text-on-background group-hover:text-primary transition-colors truncate block">{t.project}</span>
@@ -620,43 +681,42 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
                       </div>
                     </td>
                     {/* Client */}
-                    <td className="px-5 py-3 text-on-surface-variant font-medium truncate max-w-[180px] border-r border-surface-container">{t.customerName || '—'}</td>
+                    {!hiddenColumns.has('client') && <td className="px-5 py-3 text-on-surface-variant font-medium truncate max-w-[180px] border-r border-surface-container">{t.customerName || '—'}</td>}
                     {/* INV # */}
-                    <td className="px-5 py-3 font-mono text-[11px] font-semibold text-primary border-r border-surface-container">
-                      {t.invoiceNumber && t.zohoInvoiceId && zohoOrgId ? (
-                        <a
-                          href={`https://books.zoho.com/app/${zohoOrgId}#/invoices/${t.zohoInvoiceId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          className="flex items-center gap-1 hover:text-primary-dim transition-colors group/inv"
-                          title="Open in Zoho Books"
-                        >
-                          {t.invoiceNumber}
-                          <ExternalLink size={10} className="opacity-0 group-hover/inv:opacity-100 transition-opacity" />
-                        </a>
-                      ) : t.invoiceNumber || '—'}
-                    </td>
+                    {!hiddenColumns.has('inv') && (
+                      <td className="px-5 py-3 font-mono text-[11px] font-semibold text-primary border-r border-surface-container">
+                        {t.invoiceNumber && t.zohoInvoiceId && zohoOrgId ? (
+                          <a href={`https://books.zoho.com/app/${zohoOrgId}#/invoices/${t.zohoInvoiceId}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="flex items-center gap-1 hover:text-primary-dim transition-colors group/inv" title="Open in Zoho Books">
+                            {t.invoiceNumber}
+                            <ExternalLink size={10} className="opacity-0 group-hover/inv:opacity-100 transition-opacity" />
+                          </a>
+                        ) : t.invoiceNumber || '—'}
+                      </td>
+                    )}
                     {/* Client Status */}
-                    <td className="px-3 py-3 text-center min-w-[140px] border-r border-surface-container" onClick={e => e.stopPropagation()}>
-                      <select className={`w-full px-2 py-1.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border transition-all cursor-pointer outline-none appearance-none text-center ${getStatusStyle(t.clientStatus)}`} value={t.clientStatus} onChange={(e) => handleUpdateStatus(t.id, 'clientStatus', e.target.value as StatusOption)}>
-                        {FINANCE_STATUS_OPTIONS.map(opt => <option key={opt} value={opt} className="bg-white text-slate-900">{opt}</option>)}
-                      </select>
-                    </td>
+                    {!hiddenColumns.has('cStatus') && (
+                      <td className="px-3 py-3 text-center min-w-[140px] border-r border-surface-container" onClick={e => e.stopPropagation()}>
+                        <select className={`w-full px-2 py-1.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border transition-all cursor-pointer outline-none appearance-none text-center ${getStatusStyle(t.clientStatus)}`} value={t.clientStatus} onChange={(e) => handleUpdateStatus(t.id, 'clientStatus', e.target.value as StatusOption)}>
+                          {FINANCE_STATUS_OPTIONS.map(opt => <option key={opt} value={opt} className="bg-white text-slate-900">{opt}</option>)}
+                        </select>
+                      </td>
+                    )}
                     {/* Ladly Status */}
-                    <td className="px-3 py-3 text-center min-w-[140px] border-r border-surface-container" onClick={e => e.stopPropagation()}>
-                      <select className={`w-full px-2 py-1.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border transition-all cursor-pointer outline-none appearance-none text-center ${getStatusStyle(t.ladlyStatus)}`} value={t.ladlyStatus} onChange={(e) => handleUpdateStatus(t.id, 'ladlyStatus', e.target.value as StatusOption)}>
-                        {FINANCE_STATUS_OPTIONS.map(opt => <option key={opt} value={opt} className="bg-white text-slate-900">{opt}</option>)}
-                      </select>
-                    </td>
+                    {!hiddenColumns.has('lStatus') && (
+                      <td className="px-3 py-3 text-center min-w-[140px] border-r border-surface-container" onClick={e => e.stopPropagation()}>
+                        <select className={`w-full px-2 py-1.5 rounded-full text-[10px] font-semibold uppercase tracking-wide border transition-all cursor-pointer outline-none appearance-none text-center ${getStatusStyle(t.ladlyStatus)}`} value={t.ladlyStatus} onChange={(e) => handleUpdateStatus(t.id, 'ladlyStatus', e.target.value as StatusOption)}>
+                          {FINANCE_STATUS_OPTIONS.map(opt => <option key={opt} value={opt} className="bg-white text-slate-900">{opt}</option>)}
+                        </select>
+                      </td>
+                    )}
                     {/* Amounts */}
-                    <td className="px-5 py-3 text-right font-serif text-on-background border-r border-surface-container">{formatCurrency(t.amount, t.currency)}</td>
-                    <td className="px-5 py-3 text-right text-on-surface-variant border-r border-surface-container">{formatCurrency(t.vat || 0, t.currency)}</td>
-                    <td className="px-5 py-3 text-right font-serif text-on-background border-r border-surface-container">{formatCurrency(t.net || 0, t.currency)}</td>
-                    <td className="px-5 py-3 text-right text-error border-r border-surface-container">{formatCurrency(t.fee || 0, t.currency)}</td>
-                    <td className="px-5 py-3 text-right font-serif font-medium text-primary border-r border-surface-container">{formatCurrency(t.payable || 0, t.currency)}</td>
-                    <td className="px-5 py-3 text-right font-serif text-tertiary border-r border-surface-container">{formatCurrency(t.clientPayment || 0, t.currency)}</td>
-                    <td className="px-5 py-3 text-center text-on-surface-variant font-medium text-[11px]">{t.clientPaymentDate ? formatDate(t.clientPaymentDate) : '—'}</td>
+                    {!hiddenColumns.has('amount') && <td className="px-5 py-3 text-right font-serif text-on-background border-r border-surface-container">{formatCurrency(t.amount, t.currency)}</td>}
+                    {!hiddenColumns.has('vat') && <td className="px-5 py-3 text-right text-on-surface-variant border-r border-surface-container">{formatCurrency(t.vat || 0, t.currency)}</td>}
+                    {!hiddenColumns.has('net') && <td className="px-5 py-3 text-right font-serif text-on-background border-r border-surface-container">{formatCurrency(t.net || 0, t.currency)}</td>}
+                    {!hiddenColumns.has('fee') && <td className="px-5 py-3 text-right text-error border-r border-surface-container">{formatCurrency(t.fee || 0, t.currency)}</td>}
+                    {!hiddenColumns.has('payable') && <td className="px-5 py-3 text-right font-serif font-medium text-primary border-r border-surface-container">{formatCurrency(t.payable || 0, t.currency)}</td>}
+                    {!hiddenColumns.has('paid') && <td className="px-5 py-3 text-right font-serif text-tertiary border-r border-surface-container">{formatCurrency(t.clientPayment || 0, t.currency)}</td>}
+                    {!hiddenColumns.has('paymentDate') && <td className="px-5 py-3 text-center text-on-surface-variant font-medium text-[11px]">{t.clientPaymentDate ? formatDate(t.clientPaymentDate) : '—'}</td>}
                   </tr>
                 ))}
               </tbody>
