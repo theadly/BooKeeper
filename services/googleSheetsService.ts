@@ -230,18 +230,17 @@ function parseDate(raw: string): string {
   // YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
-  // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
-  const dmy = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
-  if (dmy) {
-    const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
-    return `${year}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
-  }
-
-  // MM/DD/YYYY (US format — only if month <= 12 and day > 12 is ambiguous so treat as DD/MM)
-  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mdy) {
-    const m = parseInt(mdy[1]), d = parseInt(mdy[2]), y = mdy[3];
-    if (m <= 12 && d <= 31) return `${y}-${mdy[1].padStart(2, '0')}-${mdy[2].padStart(2, '0')}`;
+  // Ambiguous d/m/y or m/d/y — detect format from values
+  const parts = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (parts) {
+    const a = parseInt(parts[1]), b = parseInt(parts[2]);
+    const year = parts[3].length === 2 ? `20${parts[3]}` : parts[3];
+    // If b > 12 it can't be a month → must be MM/DD (a=month, b=day)
+    // If a > 12 it can't be a day in DD/MM sense → must also be MM/DD
+    // Otherwise default to MM/DD (US format matches this sheet)
+    const month = b > 12 ? a : (a > 12 ? b : a); // pick whichever is ≤12 as month
+    const day   = b > 12 ? b : (a > 12 ? a : b);
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
 
   // "Jan 2025", "January 2025", "Jan-25"
