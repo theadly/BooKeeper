@@ -174,6 +174,13 @@ export interface AIChatMessage {
   timestamp: Date;
 }
 
+export interface GoogleSheetsConfig {
+  sheetUrl: string;
+  columnMapping: Record<string, string>;
+  lastSync?: string;
+  autoSync?: boolean;
+}
+
 export interface ZohoConfig {
   accessToken: string;
   refreshToken?: string;

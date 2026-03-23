@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ZohoConfig } from '../types';
+import { ZohoConfig, GoogleSheetsConfig } from '../types';
+import { fetchSheetHeaders, autoDetectMapping, MAPPABLE_FIELDS } from '../services/googleSheetsService';
 import {
   Save, RefreshCw, CheckCircle, Trash2, Download,
-  UploadCloud, Palette, Moon, Sun, X, AlertTriangle, Database, Globe, LogOut, ShieldCheck
+  UploadCloud, Palette, Moon, Sun, X, AlertTriangle, Database, Globe, LogOut, ShieldCheck,
+  Sheet, Link2, Zap
 } from 'lucide-react';
 
 interface SettingsProps {
@@ -26,18 +28,34 @@ interface SettingsProps {
   onSetShowAedEquivalent: (show: boolean) => void;
   user?: { name?: string; email?: string; avatarUrl?: string };
   onSignOut: () => void;
+  googleSheetsConfig: GoogleSheetsConfig;
+  onSaveGoogleSheetsConfig: (config: GoogleSheetsConfig) => void;
+  onSyncSheets: () => Promise<{ added: number; updated: number; skipped: number } | void>;
+  isSyncingSheets: boolean;
+  sheetSyncError?: string | null;
 }
 
 const Settings: React.FC<SettingsProps> = ({
   isOpen, onClose, config, onSaveConfig, onSync, onClearData, onExport, onImport,
   theme, onSetTheme, isDarkMode, onSetDarkMode, fontSize, onSetFontSize,
-  showAedEquivalent, onSetShowAedEquivalent, isSyncing, syncError, user, onSignOut
+  showAedEquivalent, onSetShowAedEquivalent, isSyncing, syncError, user, onSignOut,
+  googleSheetsConfig, onSaveGoogleSheetsConfig, onSyncSheets, isSyncingSheets, sheetSyncError
 }) => {
   const [formData, setFormData] = useState<ZohoConfig>({
     accessToken: '',
     organizationId: '',
     apiDomain: 'https://www.zohoapis.com'
   });
+
+  // Google Sheets state
+  const [sheetUrl, setSheetUrl] = useState('');
+  const [sheetMapping, setSheetMapping] = useState<Record<string, string>>({});
+  const [sheetAutoSync, setSheetAutoSync] = useState(false);
+  const [sheetHeaders, setSheetHeaders] = useState<string[]>([]);
+  const [detectingHeaders, setDetectingHeaders] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
+  const [sheetsDetected, setSheetsDetected] = useState(false);
+  const [sheetSyncResult, setSheetSyncResult] = useState<{ added: number; updated: number; skipped: number } | null>(null);
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved'>('idle');
   const [syncResult, setSyncResult] = useState<{ imported: number; updated: number } | null>(null);
@@ -60,15 +78,44 @@ const Settings: React.FC<SettingsProps> = ({
     }
   }, [config]);
 
+  useEffect(() => {
+    if (googleSheetsConfig) {
+      setSheetUrl(googleSheetsConfig.sheetUrl ?? '');
+      setSheetMapping(googleSheetsConfig.columnMapping ?? {});
+      setSheetAutoSync(googleSheetsConfig.autoSync ?? false);
+      if (googleSheetsConfig.sheetUrl && Object.keys(googleSheetsConfig.columnMapping ?? {}).length > 0) {
+        setSheetsDetected(true);
+      }
+    }
+  }, [googleSheetsConfig]);
+
   const handleSaveAll = () => {
     onSaveConfig(formData);
+    if (sheetUrl) {
+      onSaveGoogleSheetsConfig({ sheetUrl, columnMapping: sheetMapping, autoSync: sheetAutoSync, lastSync: googleSheetsConfig.lastSync });
+    }
     setSaveStatus('saved');
     setTimeout(() => { setSaveStatus('idle'); onClose(); }, 600);
+  };
+
+  const handleDetectColumns = async () => {
+    if (!sheetUrl.trim()) return;
+    setDetectingHeaders(true);
+    setDetectError(null);
+    setSheetsDetected(false);
+    const { headers, error } = await fetchSheetHeaders(sheetUrl.trim());
+    setDetectingHeaders(false);
+    if (error) { setDetectError(error); return; }
+    setSheetHeaders(headers);
+    const detected = autoDetectMapping(headers);
+    setSheetMapping(detected);
+    setSheetsDetected(true);
   };
 
   if (!isOpen) return null;
 
   const isZohoConnected = !!(formData.refreshToken && formData.clientId && formData.clientSecret && formData.organizationId);
+  const isSheetsConnected = !!(googleSheetsConfig.sheetUrl && Object.keys(googleSheetsConfig.columnMapping ?? {}).length > 0);
 
   const themes = [
     { id: 'slate', color: '#0f172a', label: 'Classic' },
@@ -84,6 +131,9 @@ const Settings: React.FC<SettingsProps> = ({
   const userInitials = user?.name
     ? user.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : user?.email?.slice(0, 2).toUpperCase() || '??';
+
+  const detectedCount = Object.keys(sheetMapping).length;
+  const totalFields = MAPPABLE_FIELDS.length;
 
   return (
     <div className="fixed inset-0 z-[5000] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-300" onClick={onClose}>
@@ -186,6 +236,156 @@ const Settings: React.FC<SettingsProps> = ({
                   </div>
                 </div>
               </div>
+
+              {/* Google Sheets Integration */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2.5">
+                  <Sheet size={16} className="text-primary" />
+                  <h3 className="text-[10px] font-medium text-on-background uppercase tracking-widest">Google Sheets Sync</h3>
+                </div>
+                <div className="p-5 bg-surface-container-low rounded-xl border border-surface-container space-y-4">
+
+                  {/* Connected badge */}
+                  {isSheetsConnected && (
+                    <div className="flex items-center gap-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                      <CheckCircle size={15} className="text-emerald-600 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] font-semibold text-emerald-700">Sheet Connected</p>
+                        <p className="text-[8px] text-emerald-600 font-medium truncate">
+                          {googleSheetsConfig.lastSync ? `Last synced: ${new Date(googleSheetsConfig.lastSync).toLocaleString()}` : 'Ready to sync'}
+                        </p>
+                      </div>
+                      {googleSheetsConfig.autoSync && (
+                        <div className="flex items-center gap-1 px-2 py-0.5 bg-emerald-100 rounded-full">
+                          <Zap size={9} className="text-emerald-600" />
+                          <span className="text-[8px] font-semibold text-emerald-700 uppercase">Auto</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* URL input */}
+                  <div className="space-y-1.5">
+                    <label className={labelClass}>Google Sheet URL</label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Link2 size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
+                        <input
+                          type="url"
+                          placeholder="https://docs.google.com/spreadsheets/d/..."
+                          className={`${inputClass} pl-8`}
+                          value={sheetUrl}
+                          onChange={(e) => { setSheetUrl(e.target.value); setSheetsDetected(false); setDetectError(null); }}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDetectColumns}
+                        disabled={detectingHeaders || !sheetUrl.trim()}
+                        className="px-3 py-2 bg-primary text-on-primary rounded-xl text-[9px] font-medium uppercase tracking-wider disabled:opacity-50 shrink-0 hover:bg-primary-dim transition-colors"
+                      >
+                        {detectingHeaders ? <RefreshCw size={12} className="animate-spin" /> : 'Detect'}
+                      </button>
+                    </div>
+                    <p className="text-[8px] text-on-surface-variant px-1">Share the sheet with <strong>"Anyone with the link can view"</strong> first</p>
+                  </div>
+
+                  {/* Detect error */}
+                  {detectError && (
+                    <div className="flex items-start gap-2 p-3 bg-error/5 border border-error/20 rounded-xl">
+                      <AlertTriangle size={13} className="text-error shrink-0 mt-0.5" />
+                      <p className="text-[9px] font-medium text-error">{detectError}</p>
+                    </div>
+                  )}
+
+                  {/* Column mapping */}
+                  {sheetsDetected && sheetHeaders.length > 0 && (
+                    <div className="space-y-3 animate-in fade-in duration-200">
+                      <div className="flex items-center justify-between">
+                        <label className={labelClass}>Column Mapping</label>
+                        <span className={`text-[8px] font-semibold px-2 py-0.5 rounded-full ${detectedCount >= 3 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                          {detectedCount}/{totalFields} detected
+                        </span>
+                      </div>
+                      <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar pr-1">
+                        {MAPPABLE_FIELDS.map(({ key, label, required }) => (
+                          <div key={key} className="flex items-center gap-2">
+                            <span className={`text-[8px] font-medium w-28 shrink-0 ${required ? 'text-on-background' : 'text-on-surface-variant'}`}>
+                              {label}{required ? ' *' : ''}
+                            </span>
+                            <select
+                              value={sheetMapping[key] || ''}
+                              onChange={(e) => setSheetMapping(prev => ({ ...prev, [key]: e.target.value }))}
+                              className="flex-1 bg-surface-container border border-surface-container rounded-lg px-2 py-1.5 text-[9px] font-medium text-on-background outline-none focus:ring-1 focus:ring-primary/20"
+                            >
+                              <option value="">— not mapped —</option>
+                              {sheetHeaders.map(h => (
+                                <option key={h} value={h}>{h}</option>
+                              ))}
+                            </select>
+                            {sheetMapping[key] && (
+                              <CheckCircle size={12} className="text-emerald-500 shrink-0" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Auto-sync toggle */}
+                  {(sheetsDetected || isSheetsConnected) && (
+                    <div className="flex items-center justify-between py-1">
+                      <div>
+                        <p className="text-[10px] font-medium text-on-background">Auto-sync on load</p>
+                        <p className="text-[8px] text-on-surface-variant">Automatically sync sheet when you open the app</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setSheetAutoSync(v => !v)}
+                        className={`relative w-10 h-5 rounded-full transition-colors ${sheetAutoSync ? 'bg-primary' : 'bg-surface-container'}`}
+                      >
+                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${sheetAutoSync ? 'translate-x-5' : 'translate-x-0'}`} />
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Sync button */}
+                  {(sheetsDetected || isSheetsConnected) && (
+                    <div className="pt-3 border-t border-surface-container space-y-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          // Save config first then sync
+                          onSaveGoogleSheetsConfig({ sheetUrl, columnMapping: sheetMapping, autoSync: sheetAutoSync, lastSync: googleSheetsConfig.lastSync });
+                          setSheetSyncResult(null);
+                          const result = await onSyncSheets();
+                          if (result) setSheetSyncResult(result);
+                        }}
+                        disabled={isSyncingSheets}
+                        className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-emerald-600 text-white rounded-full text-[10px] font-medium uppercase tracking-wider shadow-sm hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                      >
+                        <RefreshCw size={14} className={isSyncingSheets ? 'animate-spin' : ''} />
+                        {isSyncingSheets ? 'Syncing Sheet...' : 'Sync Sheet Now'}
+                      </button>
+
+                      {sheetSyncError && (
+                        <div className="flex items-center gap-2 p-3 bg-error/5 border border-error/20 rounded-xl">
+                          <AlertTriangle size={13} className="text-error shrink-0" />
+                          <p className="text-[9px] font-medium text-error">{sheetSyncError}</p>
+                        </div>
+                      )}
+                      {sheetSyncResult && !sheetSyncError && (
+                        <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
+                          <CheckCircle size={13} className="text-emerald-600 shrink-0" />
+                          <p className="text-[9px] font-medium text-emerald-700">
+                            {sheetSyncResult.added} added · {sheetSyncResult.updated} updated · {sheetSyncResult.skipped} skipped
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Right Column: Zoho & Data */}
@@ -198,7 +398,6 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
                 <div className="p-5 bg-surface-container-low rounded-xl border border-surface-container space-y-4">
 
-                  {/* Connected state */}
                   {isZohoConnected && (
                     <div className="flex items-center gap-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
                       <CheckCircle size={16} className="text-emerald-600 shrink-0" />
@@ -214,7 +413,6 @@ const Settings: React.FC<SettingsProps> = ({
                     <input type="text" placeholder="e.g. 712345678" className={inputClass} value={formData.organizationId} onChange={(e) => setFormData({ ...formData, organizationId: e.target.value })} />
                   </div>
 
-                  {/* Collapsible credentials */}
                   <button
                     type="button"
                     onClick={() => setShowZohoAdvanced(!showZohoAdvanced)}

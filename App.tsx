@@ -10,14 +10,15 @@ import BankingComponent from './components/Banking';
 import VatCenter from './components/VatCenter';
 import Resources from './components/Resources';
 import SignIn from './components/SignIn';
-import { 
-  Transaction, Contact, Campaign, BankTransaction, 
+import {
+  Transaction, Contact, Campaign, BankTransaction,
   TransactionType, Category, AIChatMessage, StatusOption,
-  ZohoConfig, Entity, ParsedRateItem
+  ZohoConfig, GoogleSheetsConfig, Entity, ParsedRateItem
 } from './types';
 import { RATE_CARD_SERVICES } from './constants';
 import { parseBankStatement } from './services/geminiService';
 import { fetchZohoInvoices, mergeZohoInvoice, refreshZohoToken } from './services/zohoService';
+import { syncSheetToTransactions } from './services/googleSheetsService';
 import {
   supabase,
   signInWithGoogle, signOut as supabaseSignOut,
@@ -54,6 +55,9 @@ const App: React.FC = () => {
   const [parsedRateCardData, setParsedRateCardData] = useState<ParsedRateItem[]>(RATE_CARD_SERVICES);
   const [chatHistory, setChatHistory] = useState<AIChatMessage[]>([]);
   const [zohoConfig, setZohoConfig] = useState<ZohoConfig>({ accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' });
+  const [googleSheetsConfig, setGoogleSheetsConfig] = useState<GoogleSheetsConfig>({ sheetUrl: '', columnMapping: {} });
+  const [isSyncingSheets, setIsSyncingSheets] = useState(false);
+  const [sheetSyncError, setSheetSyncError] = useState<string | null>(null);
   const [userProfile, setUserProfile] = useState<{ customName?: string; customPhoto?: string }>({});
 
   // UI Preferences
@@ -105,6 +109,7 @@ const App: React.FC = () => {
       loadSetting('parsedRateCard', RATE_CARD_SERVICES).then(setParsedRateCardData),
       loadSetting('chatHistory', []).then(setChatHistory),
       loadSetting('zohoConfig', { accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' }).then(setZohoConfig),
+      loadSetting('googleSheetsConfig', { sheetUrl: '', columnMapping: {} }).then(setGoogleSheetsConfig),
       loadSetting('userProfile', {}).then(setUserProfile),
     ]).catch(console.error);
   }, []);
@@ -172,6 +177,44 @@ const App: React.FC = () => {
     };
     autoSync();
   }, [zohoConfig.accessToken, zohoConfig.organizationId]);
+
+  // Auto-sync Google Sheet on load when autoSync is enabled
+  const hasAutoSyncedSheets = React.useRef(false);
+  useEffect(() => {
+    if (hasAutoSyncedSheets.current || !googleSheetsConfig.sheetUrl || !googleSheetsConfig.autoSync || Object.keys(googleSheetsConfig.columnMapping).length === 0) return;
+    hasAutoSyncedSheets.current = true;
+    setIsSyncingSheets(true);
+    setSheetSyncError(null);
+    syncSheetToTransactions(googleSheetsConfig, transactions).then(result => {
+      if (result.error) { setSheetSyncError(result.error); return; }
+      setTransactions(result.transactions);
+      upsertTransactions(result.transactions).catch(console.error);
+      const nextConfig = { ...googleSheetsConfig, lastSync: new Date().toISOString() };
+      setGoogleSheetsConfig(nextConfig);
+      saveSetting('googleSheetsConfig', nextConfig).catch(console.error);
+    }).catch(e => setSheetSyncError(e.message))
+      .finally(() => setIsSyncingSheets(false));
+  }, [googleSheetsConfig.sheetUrl, googleSheetsConfig.autoSync]);
+
+  const handleSyncSheets = async (): Promise<{ added: number; updated: number; skipped: number } | void> => {
+    if (!googleSheetsConfig.sheetUrl || Object.keys(googleSheetsConfig.columnMapping).length === 0) return;
+    setIsSyncingSheets(true);
+    setSheetSyncError(null);
+    try {
+      const result = await syncSheetToTransactions(googleSheetsConfig, transactions);
+      if (result.error) { setSheetSyncError(result.error); return; }
+      setTransactions(result.transactions);
+      upsertTransactions(result.transactions).catch(console.error);
+      const nextConfig = { ...googleSheetsConfig, lastSync: new Date().toISOString() };
+      setGoogleSheetsConfig(nextConfig);
+      saveSetting('googleSheetsConfig', nextConfig).catch(console.error);
+      return { added: result.added, updated: result.updated, skipped: result.skipped };
+    } catch (e: any) {
+      setSheetSyncError(e.message);
+    } finally {
+      setIsSyncingSheets(false);
+    }
+  };
 
   const handleSignIn = () => {
     signInWithGoogle().catch(console.error);
@@ -781,7 +824,12 @@ const App: React.FC = () => {
             };
             reader.readAsText(file);
         }} 
-        theme={theme} onSetTheme={setTheme} isDarkMode={isDarkMode} onSetDarkMode={setIsDarkMode} fontSize={fontSize} onSetFontSize={setFontSize} showAedEquivalent={showAedEquivalent} onSetShowAedEquivalent={setShowAedEquivalent} 
+        theme={theme} onSetTheme={setTheme} isDarkMode={isDarkMode} onSetDarkMode={setIsDarkMode} fontSize={fontSize} onSetFontSize={setFontSize} showAedEquivalent={showAedEquivalent} onSetShowAedEquivalent={setShowAedEquivalent}
+        googleSheetsConfig={googleSheetsConfig}
+        onSaveGoogleSheetsConfig={(c) => { setGoogleSheetsConfig(c); saveSetting('googleSheetsConfig', c).catch(console.error); }}
+        onSyncSheets={handleSyncSheets}
+        isSyncingSheets={isSyncingSheets}
+        sheetSyncError={sheetSyncError}
       />
 
       <AIChat 
