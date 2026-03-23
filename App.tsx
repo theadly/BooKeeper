@@ -17,7 +17,7 @@ import {
 } from './types';
 import { RATE_CARD_SERVICES } from './constants';
 import { parseBankStatement } from './services/geminiService';
-import { fetchZohoInvoices } from './services/zohoService';
+import { fetchZohoInvoices, mergeZohoInvoice, refreshZohoToken } from './services/zohoService';
 import {
   supabase,
   signInWithGoogle, signOut as supabaseSignOut,
@@ -27,6 +27,10 @@ import {
   loadCampaigns, upsertCampaign, deleteCampaign,
   loadBankTransactions, upsertBankTransaction, upsertBankTransactions, clearBankTransactions,
   loadSetting, saveSetting,
+  saveTransactionsLocal, loadTransactionsLocal,
+  saveContactsLocal, loadContactsLocal,
+  saveCampaignsLocal, loadCampaignsLocal,
+  saveBankTransactionsLocal, loadBankTransactionsLocal,
 } from './services/supabaseService';
 import * as XLSX from 'xlsx';
 import { CONFIG } from './config';
@@ -50,9 +54,11 @@ const App: React.FC = () => {
   const [parsedRateCardData, setParsedRateCardData] = useState<ParsedRateItem[]>(RATE_CARD_SERVICES);
   const [chatHistory, setChatHistory] = useState<AIChatMessage[]>([]);
   const [zohoConfig, setZohoConfig] = useState<ZohoConfig>({ accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' });
-  
+  const [userProfile, setUserProfile] = useState<{ customName?: string; customPhoto?: string }>({});
+
   // UI Preferences
-  const [activeTab, setActiveTab] = useState('dashboard'); 
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [selectedCampaignName, setSelectedCampaignName] = useState<string | null>(null);
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem('app-theme') || 'teal');
@@ -66,6 +72,7 @@ const App: React.FC = () => {
   const [isProcessingExcel, setIsProcessingExcel] = useState(false);
   const [isProcessingBanking, setIsProcessingBanking] = useState(false);
   const [isSyncingZoho, setIsSyncingZoho] = useState(false);
+  const [zohoSyncError, setZohoSyncError] = useState<string | null>(null);
   const [bankingProgress, setBankingProgress] = useState(0);
   const [bankingStatus, setBankingStatus] = useState('');
 
@@ -74,14 +81,31 @@ const App: React.FC = () => {
   const loadAllData = useCallback(async () => {
     await Promise.all([
       loadEntities().then(d => d.length ? setEntities(d) : null),
-      loadTransactions().then(setTransactions),
-      loadContacts().then(setContacts),
-      loadCampaigns().then(setCampaignMetadata),
-      loadBankTransactions().then(setBankTransactions),
+      // Load transactions from Supabase, fall back to localStorage
+      loadTransactions().then(async (supabaseTxs) => {
+        if (supabaseTxs.length > 0) { setTransactions(supabaseTxs); }
+        else {
+          const localTxs = await loadTransactionsLocal();
+          if (localTxs && localTxs.length > 0) setTransactions(localTxs);
+        }
+      }),
+      loadContacts().then(d => {
+        if (d.length > 0) { setContacts(d); }
+        else { const l = loadContactsLocal(); if (l && l.length > 0) setContacts(l); }
+      }),
+      loadCampaigns().then(d => {
+        if (Object.keys(d).length > 0) { setCampaignMetadata(d); }
+        else { const l = loadCampaignsLocal(); if (l && Object.keys(l).length > 0) setCampaignMetadata(l); }
+      }),
+      loadBankTransactions().then(d => {
+        if (d.length > 0) { setBankTransactions(d); }
+        else { const l = loadBankTransactionsLocal(); if (l && l.length > 0) setBankTransactions(l); }
+      }),
       loadSetting('resources', { mediaKit: null, rateCard: null }).then(setResources),
       loadSetting('parsedRateCard', RATE_CARD_SERVICES).then(setParsedRateCardData),
       loadSetting('chatHistory', []).then(setChatHistory),
       loadSetting('zohoConfig', { accessToken: '', organizationId: '', apiDomain: 'https://www.zohoapis.com' }).then(setZohoConfig),
+      loadSetting('userProfile', {}).then(setUserProfile),
     ]).catch(console.error);
   }, []);
 
@@ -106,6 +130,49 @@ const App: React.FC = () => {
     return () => subscription.unsubscribe();
   }, [loadAllData]);
 
+  // Auto-sync with Zoho on load when credentials are available
+  const hasAutoSynced = React.useRef(false);
+  useEffect(() => {
+    if (hasAutoSynced.current || !zohoConfig.accessToken || !zohoConfig.organizationId || isSyncingZoho) return;
+    hasAutoSynced.current = true;
+
+    const autoSync = async () => {
+      setIsSyncingZoho(true);
+      try {
+        let config = zohoConfig;
+        // Try refresh token if we have one
+        if (config.refreshToken && config.clientId && config.clientSecret) {
+          const newToken = await refreshZohoToken(config);
+          if (newToken) {
+            config = { ...config, accessToken: newToken };
+            setZohoConfig(config);
+            saveSetting('zohoConfig', config).catch(console.error);
+          }
+        }
+        const invoices = await fetchZohoInvoices(config);
+        if (invoices.length > 0) {
+          setTransactions(prev => {
+            const combined = [...prev];
+            invoices.forEach(inv => {
+              const idx = combined.findIndex(t => t.id === inv.id);
+              if (idx >= 0) combined[idx] = mergeZohoInvoice(inv, combined[idx]);
+              else combined.push(inv);
+            });
+            saveTransactionsLocal(combined).catch(console.error);
+            return combined;
+          });
+          upsertTransactions(invoices).catch(console.error);
+          const nextConfig = { ...config, lastSync: new Date().toLocaleString() };
+          setZohoConfig(nextConfig);
+          saveSetting('zohoConfig', nextConfig).catch(console.error);
+        }
+      } catch (err) {
+        console.error('Auto-sync failed:', err);
+      } finally { setIsSyncingZoho(false); }
+    };
+    autoSync();
+  }, [zohoConfig.accessToken, zohoConfig.organizationId]);
+
   const handleSignIn = () => {
     signInWithGoogle().catch(console.error);
   };
@@ -116,6 +183,25 @@ const App: React.FC = () => {
   };
 
   // --- Logic Handlers (Updated to use local State + LocalStorage) ---
+
+  // Persist all data to localStorage whenever they change (skip empty on first render)
+  const hasLoadedData = React.useRef(false);
+  useEffect(() => {
+    if (transactions.length > 0) hasLoadedData.current = true;
+    if (hasLoadedData.current) saveTransactionsLocal(transactions).catch(console.error);
+  }, [transactions]);
+
+  useEffect(() => {
+    if (contacts.length > 0) saveContactsLocal(contacts);
+  }, [contacts]);
+
+  useEffect(() => {
+    if (Object.keys(campaignMetadata).length > 0) saveCampaignsLocal(campaignMetadata);
+  }, [campaignMetadata]);
+
+  useEffect(() => {
+    if (bankTransactions.length > 0) saveBankTransactionsLocal(bankTransactions);
+  }, [bankTransactions]);
 
   const handleAddTransaction = (t: Transaction) => {
     setTransactions(prev => [...prev, t]);
@@ -162,6 +248,36 @@ const App: React.FC = () => {
     deleteContact(id).catch(console.error);
   };
 
+  // Convert Excel serial date number to ISO date string
+  const excelDateToISO = (serial: any): string => {
+    if (!serial) return new Date().toISOString().split('T')[0];
+    if (serial instanceof Date) return serial.toISOString().split('T')[0];
+    const num = Number(serial);
+    if (!isNaN(num) && num > 10000) {
+      // Excel serial date: days since 1900-01-01 (with the Lotus 1-2-3 leap year bug)
+      const utcDays = Math.floor(num - 25569);
+      const d = new Date(utcDays * 86400 * 1000);
+      return d.toISOString().split('T')[0];
+    }
+    // Already a string date
+    return String(serial);
+  };
+
+  // Normalize status values from Excel (trim whitespace, map synonyms)
+  const normalizeStatus = (raw: any): StatusOption => {
+    const s = String(raw || '').trim();
+    const lower = s.toLowerCase();
+    if (lower === 'paid') return 'Paid';
+    if (lower === 'paid to personal account') return 'Paid to personal account';
+    if (lower === 'pending') return 'Pending';
+    if (lower === 'unpaid' || lower === 'invoiced' || lower === 'sent') return 'Unpaid';
+    if (lower === 'overdue') return 'Overdue';
+    if (lower === 'void' || lower === 'cancelled') return 'Void';
+    if (lower === 'draft') return 'Draft';
+    if (s === '') return 'Pending';
+    return 'Pending';
+  };
+
   const processExcelFile = async (file: File) => {
     setIsProcessingExcel(true);
     try {
@@ -170,33 +286,47 @@ const App: React.FC = () => {
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
       const jsonData = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-      const newTransactions: Transaction[] = jsonData.map((row) => {
+      const newTransactions: Transaction[] = jsonData.filter((row) => {
+        const project = String(row.Campaign || row.Project || row.Description || '').trim();
+        const amount = Number(row['INV Amount'] || row.Amount || row.Total || 0);
+        const client = String(row.Client || row.Customer || '').trim();
+        return project !== '' || amount > 0 || client !== '';
+      }).map((row) => {
         const id = generateId();
-        const amount = Number(row.Amount || row.Total || 0);
-        const net = amount / (1 + CONFIG.VAT_RATE);
-        const vat = amount - net;
-        const fee = net * CONFIG.ADLY_FEE_RATE;
-        const payable = net - fee;
+        const amount = Number(row['INV Amount'] || row.Amount || row.Total || 0);
+        // Use pre-calculated values from Excel if available, else derive
+        const net = Number(row.Net) || Number((amount / (1 + CONFIG.VAT_RATE)).toFixed(2));
+        const vat = Number(row.VAT) || Number((amount - net).toFixed(2));
+        const fee = Number(row['Ladly Fee']) || Number((net * CONFIG.ADLY_FEE_RATE).toFixed(2));
+        const payable = Number(row['Payable to LM']) || Number((net - fee).toFixed(2));
+        const transferWithVat = Number(row['Transfer with VAT']) || 0;
+        const rawDate = row['INV Date'] || row.Date;
+        const date = excelDateToISO(rawDate);
+        const dateObj = new Date(date);
+
+        const clientStatus = normalizeStatus(row['Client Status'] || row.Status);
+        const ladlyStatus = normalizeStatus(row['Ladly Status']);
 
         return {
           id,
-          year: Number(row.Year) || new Date().getFullYear(),
-          date: row.Date || new Date().toISOString().split('T')[0],
-          project: row.Project || row.Description || 'Imported Project',
+          year: Number(row.Year) || (dateObj.getFullYear() || new Date().getFullYear()),
+          date,
+          project: String(row.Campaign || row.Project || row['Campaign Name'] || row.Description || 'Imported Project').trim(),
           description: row.Description || 'Imported from Excel',
           amount,
-          currency: (row.Currency === 'USD' ? 'USD' : 'AED'),
+          currency: (row.Currency === 'USD' ? 'USD' : 'AED') as 'AED' | 'USD',
           vat: Number(vat.toFixed(2)),
           net: Number(net.toFixed(2)),
           fee: Number(fee.toFixed(2)),
           payable: Number(payable.toFixed(2)),
-          category: row.Category || Category.OTHER,
+          transferWithVat,
+          category: row.Category || Category.FREELANCE,
           type: (row.Type === 'Expense' ? TransactionType.EXPENSE : TransactionType.INCOME),
-          clientStatus: (row.Status || 'Pending') as StatusOption,
-          ladlyStatus: (row.Status || 'Pending') as StatusOption,
-          invoiceNumber: row.InvoiceNumber || row['Invoice #'] || '',
-          customerName: row.Customer || row.Client || '',
-          createdAt: new Date().toISOString()
+          clientStatus,
+          ladlyStatus,
+          invoiceNumber: String(row['INV #'] || row.InvoiceNumber || row['Invoice #'] || '').trim(),
+          customerName: String(row.Client || row.Customer || '').trim(),
+          country: String(row.C0untry || row.Country || '').trim(),
         };
       });
 
@@ -307,6 +437,85 @@ const App: React.FC = () => {
     return Object.values(list).filter(c => !allMergedChildren.has(c.projectName));
   }, [transactions, campaignMetadata]);
 
+  // Theme token maps — full Material Design 3 palettes per theme
+  const THEME_TOKENS: Record<string, Record<string, string>> = {
+    teal: {
+      '--md-primary': '#006b62', '--md-primary-dim': '#005e56', '--md-on-primary': '#e2fff9',
+      '--md-primary-container': '#89f5e7', '--md-on-primary-container': '#005c54',
+      '--md-primary-fixed': '#89f5e7', '--md-primary-fixed-dim': '#7ae7d8',
+      '--md-secondary': '#4b6460', '--md-on-secondary': '#e3fff9',
+      '--md-secondary-container': '#cce8e3', '--md-on-secondary-container': '#3d5653',
+      '--md-tertiary': '#346578', '--md-on-tertiary': '#f2faff',
+      '--md-tertiary-container': '#b6e7fe', '--md-on-tertiary-container': '#235669',
+      '--md-background': '#f6faf8', '--md-surface': '#f6faf8', '--md-surface-bright': '#f6faf8', '--md-surface-dim': '#d1dcd9',
+      '--md-surface-container-lowest': '#ffffff', '--md-surface-container-low': '#eef5f3',
+      '--md-surface-container': '#e7f0ed', '--md-surface-container-high': '#e1eae7', '--md-surface-container-highest': '#d9e5e2',
+      '--md-surface-variant': '#d9e5e2',
+      '--md-on-background': '#2a3433', '--md-on-surface': '#2a3433', '--md-on-surface-variant': '#56615f',
+      '--md-outline': '#727d7b', '--md-outline-variant': '#a9b4b1',
+    },
+    indigo: {
+      '--md-primary': '#4f46e5', '--md-primary-dim': '#4338ca', '--md-on-primary': '#eef2ff',
+      '--md-primary-container': '#c7d2fe', '--md-on-primary-container': '#3730a3',
+      '--md-primary-fixed': '#c7d2fe', '--md-primary-fixed-dim': '#a5b4fc',
+      '--md-secondary': '#6366f1', '--md-on-secondary': '#eef2ff',
+      '--md-secondary-container': '#e0e7ff', '--md-on-secondary-container': '#4338ca',
+      '--md-tertiary': '#7c3aed', '--md-on-tertiary': '#f5f3ff',
+      '--md-tertiary-container': '#ddd6fe', '--md-on-tertiary-container': '#5b21b6',
+      '--md-background': '#f8f7ff', '--md-surface': '#f8f7ff', '--md-surface-bright': '#f8f7ff', '--md-surface-dim': '#d8d6e8',
+      '--md-surface-container-lowest': '#ffffff', '--md-surface-container-low': '#f0eef8',
+      '--md-surface-container': '#e8e6f2', '--md-surface-container-high': '#e2dfe8', '--md-surface-container-highest': '#dbd8e5',
+      '--md-surface-variant': '#e2dfe8',
+      '--md-on-background': '#1e1b4b', '--md-on-surface': '#1e1b4b', '--md-on-surface-variant': '#4c4672',
+      '--md-outline': '#6b6494', '--md-outline-variant': '#a8a3c5',
+    },
+    slate: {
+      '--md-primary': '#0f172a', '--md-primary-dim': '#1e293b', '--md-on-primary': '#f8fafc',
+      '--md-primary-container': '#cbd5e1', '--md-on-primary-container': '#0f172a',
+      '--md-primary-fixed': '#cbd5e1', '--md-primary-fixed-dim': '#94a3b8',
+      '--md-secondary': '#334155', '--md-on-secondary': '#f1f5f9',
+      '--md-secondary-container': '#e2e8f0', '--md-on-secondary-container': '#1e293b',
+      '--md-tertiary': '#475569', '--md-on-tertiary': '#f8fafc',
+      '--md-tertiary-container': '#e2e8f0', '--md-on-tertiary-container': '#334155',
+      '--md-background': '#f8fafc', '--md-surface': '#f8fafc', '--md-surface-bright': '#f8fafc', '--md-surface-dim': '#dce1e6',
+      '--md-surface-container-lowest': '#ffffff', '--md-surface-container-low': '#f1f5f9',
+      '--md-surface-container': '#e2e8f0', '--md-surface-container-high': '#dce3eb', '--md-surface-container-highest': '#d5dce4',
+      '--md-surface-variant': '#dce3eb',
+      '--md-on-background': '#0f172a', '--md-on-surface': '#0f172a', '--md-on-surface-variant': '#475569',
+      '--md-outline': '#64748b', '--md-outline-variant': '#94a3b8',
+    },
+    rose: {
+      '--md-primary': '#be123c', '--md-primary-dim': '#9f1239', '--md-on-primary': '#fff1f2',
+      '--md-primary-container': '#fecdd3', '--md-on-primary-container': '#9f1239',
+      '--md-primary-fixed': '#fecdd3', '--md-primary-fixed-dim': '#fda4af',
+      '--md-secondary': '#e11d48', '--md-on-secondary': '#fff1f2',
+      '--md-secondary-container': '#ffe4e6', '--md-on-secondary-container': '#be123c',
+      '--md-tertiary': '#c026d3', '--md-on-tertiary': '#fdf4ff',
+      '--md-tertiary-container': '#f5d0fe', '--md-on-tertiary-container': '#86198f',
+      '--md-background': '#fef7f8', '--md-surface': '#fef7f8', '--md-surface-bright': '#fef7f8', '--md-surface-dim': '#e8d5d8',
+      '--md-surface-container-lowest': '#ffffff', '--md-surface-container-low': '#fceef0',
+      '--md-surface-container': '#f5e6e9', '--md-surface-container-high': '#f0dfe2', '--md-surface-container-highest': '#ead9dc',
+      '--md-surface-variant': '#f0dfe2',
+      '--md-on-background': '#3a1520', '--md-on-surface': '#3a1520', '--md-on-surface-variant': '#6b4050',
+      '--md-outline': '#8e5e6e', '--md-outline-variant': '#b89aa5',
+    },
+    amber: {
+      '--md-primary': '#b45309', '--md-primary-dim': '#92400e', '--md-on-primary': '#fffbeb',
+      '--md-primary-container': '#fde68a', '--md-on-primary-container': '#92400e',
+      '--md-primary-fixed': '#fde68a', '--md-primary-fixed-dim': '#fbbf24',
+      '--md-secondary': '#d97706', '--md-on-secondary': '#fffbeb',
+      '--md-secondary-container': '#fef3c7', '--md-on-secondary-container': '#b45309',
+      '--md-tertiary': '#ea580c', '--md-on-tertiary': '#fff7ed',
+      '--md-tertiary-container': '#fed7aa', '--md-on-tertiary-container': '#c2410c',
+      '--md-background': '#fefcf3', '--md-surface': '#fefcf3', '--md-surface-bright': '#fefcf3', '--md-surface-dim': '#e8e1cc',
+      '--md-surface-container-lowest': '#ffffff', '--md-surface-container-low': '#faf6e8',
+      '--md-surface-container': '#f3efe0', '--md-surface-container-high': '#eee9d9', '--md-surface-container-highest': '#e8e3d3',
+      '--md-surface-variant': '#eee9d9',
+      '--md-on-background': '#3b2506', '--md-on-surface': '#3b2506', '--md-on-surface-variant': '#6b5530',
+      '--md-outline': '#8e7650', '--md-outline-variant': '#b8a17e',
+    },
+  };
+
   // Effects for UI Preferences
   useEffect(() => {
     localStorage.setItem('app-theme', theme);
@@ -316,8 +525,13 @@ const App: React.FC = () => {
     localStorage.setItem('columnWidths', JSON.stringify(columnWidths));
     localStorage.setItem('columnLabels', JSON.stringify(columnLabels));
     localStorage.setItem('dismissedTips', JSON.stringify(dismissedTips));
-    document.documentElement.className = `theme-${theme} ${isDarkMode ? 'dark' : ''}`;
-    document.documentElement.style.setProperty('--root-font-size', `${fontSize}px`);
+
+    // Apply theme tokens as CSS variables
+    const tokens = THEME_TOKENS[theme] || THEME_TOKENS.teal;
+    const root = document.documentElement;
+    Object.entries(tokens).forEach(([key, value]) => root.style.setProperty(key, value));
+    root.className = isDarkMode ? 'dark' : '';
+    root.style.setProperty('--root-font-size', `${fontSize}px`);
   }, [theme, isDarkMode, fontSize, showAedEquivalent, columnWidths, columnLabels, dismissedTips]);
 
   if (isAuthChecking) return <div className="h-screen flex items-center justify-center bg-bg-page"><div className="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent"></div></div>;
@@ -326,10 +540,16 @@ const App: React.FC = () => {
   const activeEntity = entities.find(e => e.id === currentEntityId) || entities[0];
 
   return (
-    <Layout 
-      activeTab={activeTab} setActiveTab={setActiveTab} isAnyProcessing={isProcessingExcel || isProcessingBanking || isSyncingZoho} 
-      isAiOpen={isAiOpen} onToggleAi={() => setIsAiOpen(!isAiOpen)} onOpenSettings={() => setIsSettingsOpen(true)} onSignOut={handleSignOut} 
+    <Layout
+      activeTab={activeTab} setActiveTab={setActiveTab} isAnyProcessing={isProcessingExcel || isProcessingBanking || isSyncingZoho}
+      isAiOpen={isAiOpen} onToggleAi={() => setIsAiOpen(!isAiOpen)} onOpenSettings={() => setIsSettingsOpen(true)} onSignOut={handleSignOut}
       entities={entities} activeEntity={activeEntity} onSwitchEntity={(id) => setCurrentEntityId(id)}
+      user={{ name: user?.user_metadata?.full_name || user?.user_metadata?.name, email: user?.email, avatarUrl: user?.user_metadata?.avatar_url }}
+      userProfile={userProfile}
+      onSaveUserProfile={(profile) => {
+        setUserProfile(profile);
+        saveSetting('userProfile', profile).catch(console.error);
+      }}
       onCreateEntity={(n, l) => {
         const entity = { id: generateId(), name: n, logo: l, initials: n.substring(0,2).toUpperCase(), color: 'bg-primary' };
         setEntities(prev => [...prev, entity]);
@@ -347,6 +567,32 @@ const App: React.FC = () => {
         }
       }}
       ledgerCount={transactions.length} bankTxCount={bankTransactions.length}
+      zohoConnected={!!(zohoConfig.refreshToken && zohoConfig.clientId && zohoConfig.clientSecret && zohoConfig.organizationId)}
+      isSyncingZoho={isSyncingZoho}
+      zohoLastSync={zohoConfig.lastSync}
+      onZohoSync={async () => {
+        setIsSyncingZoho(true);
+        setZohoSyncError(null);
+        try {
+          let config = zohoConfig;
+          if (config.refreshToken && config.clientId && config.clientSecret) {
+            const newToken = await refreshZohoToken(config);
+            if (newToken) { config = { ...config, accessToken: newToken }; setZohoConfig(config); saveSetting('zohoConfig', config).catch(console.error); }
+          }
+          const invoices = await fetchZohoInvoices(config);
+          setTransactions(prev => {
+            const combined = [...prev];
+            invoices.forEach(inv => { const idx = combined.findIndex(t => t.id === inv.id); if (idx >= 0) combined[idx] = mergeZohoInvoice(inv, combined[idx]); else combined.push(inv); });
+            saveTransactionsLocal(combined).catch(console.error);
+            return combined;
+          });
+          upsertTransactions(invoices).catch(console.error);
+          const nextConfig = { ...config, lastSync: new Date().toLocaleString() };
+          setZohoConfig(nextConfig);
+          saveSetting('zohoConfig', nextConfig).catch(console.error);
+        } catch (err: any) { setZohoSyncError(err.message); }
+        finally { setIsSyncingZoho(false); }
+      }}
     >
       {activeTab === 'dashboard' && <Dashboard transactions={transactions} showAedEquivalent={showAedEquivalent} />}
       {activeTab === 'finance' && (
@@ -429,7 +675,7 @@ const App: React.FC = () => {
               deleteCampaign(oldN).catch(console.error);
             }
           }}
-          selectedProjectName={null} setSelectedProjectName={() => {}} showAedEquivalent={showAedEquivalent} 
+          selectedProjectName={selectedCampaignName} setSelectedProjectName={setSelectedCampaignName} showAedEquivalent={showAedEquivalent}
         />
       )}
       {activeTab === 'crm' && (
@@ -456,30 +702,52 @@ const App: React.FC = () => {
         />
       )}
 
-      <Settings 
-        isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} config={zohoConfig} 
+      <Settings
+        isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} config={zohoConfig}
         onSaveConfig={(c) => { setZohoConfig(c); saveSetting('zohoConfig', c).catch(console.error); }}
+        user={{ name: user?.user_metadata?.full_name || user?.user_metadata?.name, email: user?.email, avatarUrl: user?.user_metadata?.avatar_url }}
+        onSignOut={handleSignOut}
         onSync={async () => {
             setIsSyncingZoho(true);
+            setZohoSyncError(null);
             try {
-                const invoices = await fetchZohoInvoices(zohoConfig);
-                const toUpsert: Transaction[] = [];
+                let config = zohoConfig;
+                // Try refresh token first
+                if (config.refreshToken && config.clientId && config.clientSecret) {
+                  const newToken = await refreshZohoToken(config);
+                  if (newToken) {
+                    config = { ...config, accessToken: newToken };
+                    setZohoConfig(config);
+                    saveSetting('zohoConfig', config).catch(console.error);
+                  }
+                }
+                const invoices = await fetchZohoInvoices(config);
+                const existingIds = new Set(transactions.map(t => t.id));
+                const imported = invoices.filter(inv => !existingIds.has(inv.id)).length;
+                const updated = invoices.filter(inv => existingIds.has(inv.id)).length;
                 setTransactions(prev => {
                   const combined = [...prev];
                   invoices.forEach(inv => {
                     const idx = combined.findIndex(t => t.id === inv.id);
-                    if (idx >= 0) combined[idx] = inv; else combined.push(inv);
-                    toUpsert.push(inv);
+                    if (idx >= 0) combined[idx] = mergeZohoInvoice(inv, combined[idx]);
+                    else combined.push(inv);
                   });
+                  saveTransactionsLocal(combined).catch(console.error);
                   return combined;
                 });
-                upsertTransactions(toUpsert).catch(console.error);
-                const nextConfig = { ...zohoConfig, lastSync: new Date().toLocaleString() };
+                upsertTransactions(invoices).catch(console.error);
+                const nextConfig = { ...config, lastSync: new Date().toLocaleString() };
                 setZohoConfig(nextConfig);
                 saveSetting('zohoConfig', nextConfig).catch(console.error);
+                return { imported, updated };
+            } catch (err: any) {
+                const msg = err?.message || 'Sync failed. Check your token and organization ID.';
+                setZohoSyncError(msg);
+                console.error('Zoho sync error:', err);
             } finally { setIsSyncingZoho(false); }
         }}
         isSyncing={isSyncingZoho}
+        syncError={zohoSyncError}
         onClearData={() => {
             localStorage.clear();
             window.location.reload();

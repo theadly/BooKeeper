@@ -176,6 +176,9 @@ export interface AIChatMessage {
 
 export interface ZohoConfig {
   accessToken: string;
+  refreshToken?: string;
+  clientId?: string;
+  clientSecret?: string;
   organizationId: string;
   apiDomain: string;
   lastSync?: string;

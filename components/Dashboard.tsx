@@ -125,13 +125,15 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, showAedEquivalent }
           { label: 'Receivables', val: totalOutstanding, color: 'text-white', icon: <Clock size={14}/>, sub: 'Outstanding', isPrimary: true },
           { label: 'Tax', val: totalVAT, color: 'text-slate-900', icon: <Receipt size={14}/>, sub: 'VAT Liability' },
         ].map((kpi, idx) => (
-          <div key={idx} className={`p-4 rounded-2xl border shadow-sm transition-all hover:scale-[1.02] duration-300 ${kpi.isPrimary ? 'bg-primary border-primary text-white shadow-lg' : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800'}`}>
-            <div className="flex justify-between items-start mb-2">
-               <p className={`text-[8px] font-black uppercase tracking-widest ${kpi.isPrimary ? 'text-white/60' : 'text-slate-400'}`}>{kpi.label}</p>
-               <div className={`p-1.5 rounded-lg shrink-0 ${kpi.isPrimary ? 'bg-white/10 text-white' : 'bg-slate-50 dark:bg-slate-800 text-slate-400'}`}>{kpi.icon}</div>
+          <div key={idx} className={`p-5 rounded-xl shadow-sm transition-all hover:shadow-md duration-300 flex flex-col justify-between ${kpi.isPrimary ? 'bg-gradient-to-br from-primary to-primary-dim text-on-primary' : 'bg-surface-container-lowest'}`}>
+            <div className="flex justify-between items-start mb-3">
+               <p className={`text-[9px] font-semibold uppercase tracking-wider ${kpi.isPrimary ? 'text-on-primary/70' : 'text-on-surface-variant'}`}>{kpi.label}</p>
+               <div className={`p-1.5 rounded-lg shrink-0 ${kpi.isPrimary ? 'bg-white/15 text-on-primary' : 'bg-surface-container text-on-surface-variant'}`}>{kpi.icon}</div>
             </div>
-            <p className="text-lg font-black">{formatCurrency(kpi.val, 'AED')}</p>
-            <p className={`text-[7px] font-bold uppercase tracking-widest ${kpi.isPrimary ? 'text-white/40' : 'text-slate-400'}`}>{kpi.sub}</p>
+            <div>
+              <p className={`font-serif text-2xl ${kpi.isPrimary ? 'text-on-primary' : 'text-on-background'}`}>{formatCurrency(kpi.val, 'AED')}</p>
+              <p className={`text-[9px] font-medium mt-1 ${kpi.isPrimary ? 'text-on-primary/60' : 'text-on-surface-variant'}`}>{kpi.sub}</p>
+            </div>
           </div>
         ))}
       </div>
@@ -140,23 +142,23 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, showAedEquivalent }
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-0 flex-1">
         
         {/* Wider Charts Hub (8/12) */}
-        <div className="lg:col-span-8 bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col group/card relative">
+        <div className="lg:col-span-8 bg-surface-container-lowest p-6 sm:p-8 rounded-xl shadow-sm flex flex-col group/card relative">
           <div className="flex flex-col xl:flex-row xl:items-center justify-between mb-10 shrink-0 gap-6">
             <div className="flex items-center gap-4">
                <div className={`p-3 rounded-xl transition-all duration-500 shadow-sm ${currentConfig.bg}`} style={{ color: currentConfig.color }}>
                  {currentConfig.icon}
                </div>
                <div>
-                  <h3 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider">Financial Intelligence</h3>
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Growth & Distributions</p>
+                  <h3 className="font-serif text-lg text-on-background">Financial Intelligence</h3>
+                  <p className="text-[9px] font-medium text-on-surface-variant uppercase tracking-widest">Growth & Distributions</p>
                </div>
             </div>
             
             {/* Premium Segmented Switcher */}
-            <div className="relative flex bg-slate-100 dark:bg-slate-800 p-1.5 rounded-2xl w-full xl:w-auto self-center">
+            <div className="relative flex bg-surface-container p-1.5 rounded-xl w-full xl:w-auto self-center">
               {/* Sliding Background Pill */}
-              <div 
-                className="absolute top-1.5 bottom-1.5 bg-white dark:bg-slate-700 rounded-xl shadow-lg transition-all duration-300 ease-out"
+              <div
+                className="absolute top-1.5 bottom-1.5 bg-surface-container-lowest rounded-lg shadow-sm transition-all duration-300 ease-out"
                 style={{ 
                   left: `${(activeMetricIndex * 100) / metricConfigs.length}%`,
                   width: `${100 / metricConfigs.length}%`,
@@ -168,7 +170,7 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, showAedEquivalent }
                 <button 
                   key={idx} 
                   onClick={() => setActiveMetricIndex(idx)}
-                  className={`relative z-10 flex-1 xl:px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-colors duration-300 flex items-center justify-center gap-2 whitespace-nowrap ${activeMetricIndex === idx ? 'text-slate-900 dark:text-white' : 'text-slate-400 hover:text-slate-500'}`}
+                  className={`relative z-10 flex-1 xl:px-6 py-2.5 rounded-lg text-[10px] font-semibold uppercase tracking-widest transition-colors duration-300 flex items-center justify-center gap-2 whitespace-nowrap ${activeMetricIndex === idx ? 'text-on-background' : 'text-on-surface-variant hover:text-on-background'}`}
                 >
                   <span className={`transition-transform duration-300 ${activeMetricIndex === idx ? 'scale-110' : 'scale-100'}`}>{cfg.icon}</span>
                   <span className="hidden sm:inline">{cfg.label}</span>
@@ -200,9 +202,9 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, showAedEquivalent }
           
           <div className="mt-8 flex items-center justify-center gap-8 shrink-0">
              {annualMetrics.slice(-4).map((m: any) => (
-               <div key={m.year} className={`flex flex-col items-center p-2 rounded-xl transition-all ${m.year === currentYear ? 'bg-primary/5 px-4 ring-1 ring-primary/10' : ''}`}>
-                  <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-1">{m.year}</span>
-                  <span className={`text-[10px] font-black transition-colors ${m.year === currentYear ? 'text-primary' : 'text-slate-600 dark:text-slate-400'}`}>
+               <div key={m.year} className={`flex flex-col items-center p-2 rounded-lg transition-all ${m.year === currentYear ? 'bg-primary/5 px-4 ring-1 ring-primary/10' : ''}`}>
+                  <span className="text-[8px] font-medium text-on-surface-variant uppercase tracking-widest mb-1">{m.year}</span>
+                  <span className={`text-[10px] font-semibold transition-colors ${m.year === currentYear ? 'text-primary' : 'text-on-surface-variant'}`}>
                     {formatCurrency(m[currentConfig.key], 'AED')}
                   </span>
                </div>
@@ -211,10 +213,13 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, showAedEquivalent }
         </div>
 
         {/* Categories Panel (4/12) */}
-        <div className="lg:col-span-4 bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col overflow-hidden">
-           <div className="flex items-center gap-3 mb-8 shrink-0">
-                <div className="p-2 bg-rose-50 dark:bg-rose-900/20 rounded-xl text-rose-500"><PieChart size={18} /></div>
-                <h3 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-widest">Spend Distribution</h3>
+        <div className="lg:col-span-4 bg-surface-container-lowest p-6 sm:p-8 rounded-xl shadow-sm flex flex-col overflow-hidden">
+           <div className="flex items-center gap-3 mb-6 shrink-0">
+                <div className="p-2 bg-surface-container rounded-lg text-on-surface-variant"><PieChart size={18} /></div>
+                <div>
+                  <h3 className="font-serif text-lg text-on-background">Spend Distribution</h3>
+                  <p className="text-[9px] font-medium text-on-surface-variant uppercase tracking-widest">Monthly allocation</p>
+                </div>
            </div>
            
            <div className="space-y-4 overflow-y-auto custom-scrollbar flex-1 pr-1">
@@ -225,11 +230,11 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, showAedEquivalent }
                     return (
                       <div key={idx} className="group">
                         <div className="flex items-center justify-between mb-1.5">
-                           <span className="text-[10px] font-black text-slate-700 dark:text-slate-300 uppercase truncate">{cat.name}</span>
-                           <span className="text-[10px] font-black text-slate-900 dark:text-white">{formatCurrency(cat.value, 'AED')}</span>
+                           <span className="text-[10px] font-semibold text-on-background uppercase truncate">{cat.name}</span>
+                           <span className="text-[10px] font-semibold text-on-surface-variant">{formatCurrency(cat.value, 'AED')}</span>
                         </div>
-                        <div className="h-1 bg-slate-50 dark:bg-slate-800 rounded-full overflow-hidden">
-                           <div className="h-full bg-rose-500 rounded-full" style={{ width: `${percentage}%` }} />
+                        <div className="h-1.5 bg-surface-container rounded-full overflow-hidden">
+                           <div className="h-full bg-primary rounded-full" style={{ width: `${percentage}%` }} />
                         </div>
                       </div>
                     );
@@ -243,29 +248,29 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, showAedEquivalent }
       </div>
 
       {/* Receivables Radar */}
-      <div className="bg-white dark:bg-slate-900 p-6 sm:p-8 rounded-[2rem] shadow-sm border border-slate-100 dark:border-slate-800 overflow-hidden shrink-0">
+      <div className="bg-surface-container-lowest p-6 sm:p-8 rounded-xl shadow-sm overflow-hidden shrink-0">
            <div className="flex items-center justify-between mb-6 shrink-0">
-                <h3 className="text-[10px] font-black text-slate-900 dark:text-white uppercase tracking-widest">Receivables Radar</h3>
-                <span className="text-[8px] font-black text-amber-600 bg-amber-50 dark:bg-amber-900/20 px-2 py-0.5 rounded uppercase tracking-widest">Action Needed</span>
+                <h3 className="font-serif text-xl text-on-background">Receivables Radar</h3>
+                <span className="text-[8px] font-semibold text-amber-700 bg-amber-50 px-3 py-1 rounded-full uppercase tracking-wider">Action Needed</span>
            </div>
-           <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-4">
+           <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {transactions
                 .filter(t => t.type === TransactionType.INCOME && ['Unpaid', 'Pending', 'Overdue'].includes(t.clientStatus))
                 .slice(0, 8)
                 .map((inv) => (
-                <div key={inv.id} className="flex items-center justify-between p-3 bg-slate-50/50 dark:bg-slate-800/30 rounded-xl border border-slate-100 dark:border-slate-800 group hover:border-primary transition-all">
+                <div key={inv.id} className="flex items-center justify-between p-3 bg-surface-container-low rounded-xl group hover:shadow-md hover:bg-surface-container-lowest transition-all cursor-pointer">
                    <div className="flex items-center gap-3 truncate">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${inv.clientStatus === 'Overdue' ? 'bg-rose-50 text-rose-500' : 'bg-white dark:bg-slate-700 text-primary'}`}>
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${inv.clientStatus === 'Overdue' ? 'bg-error/10 text-error' : 'bg-primary-container/40 text-primary'}`}>
                          <FileText size={14} />
                       </div>
                       <div className="truncate">
-                        <p className="text-[10px] font-black text-slate-800 dark:text-white truncate">{inv.project}</p>
-                        <p className="text-[8px] text-slate-400 font-bold uppercase">{inv.customerName || 'Client'}</p>
+                        <p className="text-[10px] font-semibold text-on-background truncate">{inv.project}</p>
+                        <p className="text-[8px] text-on-surface-variant font-medium uppercase">{inv.customerName || 'Client'}</p>
                       </div>
                    </div>
                    <div className="text-right shrink-0 ml-2">
-                      <p className="text-[10px] font-black">{formatCurrency(getAedVal(inv.amount, inv.currency), 'AED')}</p>
-                      <p className="text-[7px] font-black text-amber-600 uppercase">{inv.clientStatus}</p>
+                      <p className="font-serif text-sm text-on-background">{formatCurrency(getAedVal(inv.amount, inv.currency), 'AED')}</p>
+                      <p className="text-[7px] font-semibold text-amber-600 uppercase">{inv.clientStatus}</p>
                    </div>
                 </div>
               ))}

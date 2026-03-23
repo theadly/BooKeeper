@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BooKeeper</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,500;0,700;1,400&family=Manrope:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -11,15 +14,60 @@
         theme: {
           extend: {
             colors: {
-              primary: 'var(--primary)',
-              'primary-foreground': 'var(--primary-foreground)',
-              'bg-page': 'var(--bg-page)',
-              'bg-card': 'var(--bg-card)',
-              'sidebar': 'var(--sidebar)',
+              "background": "var(--md-background, #f6faf8)",
+              "surface": "var(--md-surface, #f6faf8)",
+              "surface-bright": "var(--md-surface-bright, #f6faf8)",
+              "surface-dim": "var(--md-surface-dim, #d1dcd9)",
+              "surface-container-lowest": "var(--md-surface-container-lowest, #ffffff)",
+              "surface-container-low": "var(--md-surface-container-low, #eef5f3)",
+              "surface-container": "var(--md-surface-container, #e7f0ed)",
+              "surface-container-high": "var(--md-surface-container-high, #e1eae7)",
+              "surface-container-highest": "var(--md-surface-container-highest, #d9e5e2)",
+              "surface-variant": "var(--md-surface-variant, #d9e5e2)",
+              "on-background": "var(--md-on-background, #2a3433)",
+              "on-surface": "var(--md-on-surface, #2a3433)",
+              "on-surface-variant": "var(--md-on-surface-variant, #56615f)",
+              "outline": "var(--md-outline, #727d7b)",
+              "outline-variant": "var(--md-outline-variant, #a9b4b1)",
+              "primary": "var(--md-primary, #006b62)",
+              "on-primary": "var(--md-on-primary, #e2fff9)",
+              "primary-container": "var(--md-primary-container, #89f5e7)",
+              "on-primary-container": "var(--md-on-primary-container, #005c54)",
+              "primary-fixed": "var(--md-primary-fixed, #89f5e7)",
+              "primary-fixed-dim": "var(--md-primary-fixed-dim, #7ae7d8)",
+              "primary-dim": "var(--md-primary-dim, #005e56)",
+              "on-primary-fixed": "var(--md-on-primary-fixed, #004841)",
+              "on-primary-fixed-variant": "var(--md-on-primary-fixed-variant, #00675e)",
+              "secondary": "var(--md-secondary, #4b6460)",
+              "on-secondary": "var(--md-on-secondary, #e3fff9)",
+              "secondary-container": "var(--md-secondary-container, #cce8e3)",
+              "on-secondary-container": "var(--md-on-secondary-container, #3d5653)",
+              "tertiary": "var(--md-tertiary, #346578)",
+              "on-tertiary": "var(--md-on-tertiary, #f2faff)",
+              "tertiary-container": "var(--md-tertiary-container, #b6e7fe)",
+              "on-tertiary-container": "var(--md-on-tertiary-container, #235669)",
+              "error": "#a83836",
+              "on-error": "#fff7f6",
+              "error-container": "#fa746f",
+              "on-error-container": "#6e0a12",
+              "surface-tint": "var(--md-primary, #006b62)",
+              "inverse-surface": "#0a0f0e",
+              "inverse-on-surface": "#999e9c",
+              "inverse-primary": "#91feef",
+              "primary-foreground": "var(--md-on-primary, #e2fff9)",
+              "bg-page": "var(--md-background, #f6faf8)",
+              "bg-card": "var(--md-surface-container-lowest, #ffffff)",
+              "sidebar": "var(--md-surface-container-low, #eef5f3)",
+            },
+            fontFamily: {
+              "sans": ["Manrope", "ui-sans-serif", "system-ui", "sans-serif"],
+              "serif": ["Noto Serif", "ui-serif", "Georgia", "serif"],
+              "headline": ["Noto Serif", "serif"],
+              "body": ["Manrope", "sans-serif"],
+              "label": ["Manrope", "sans-serif"],
             },
             animation: {
               'spin-slow': 'spin 12s linear infinite',
-              'reverse-spin-slow': 'reverse-spin 12s linear infinite',
               'pulse-soft': 'pulse-soft 3s ease-in-out infinite',
               'float': 'float 4s ease-in-out infinite',
             }
@@ -29,47 +77,23 @@
     </script>
     <style>
       :root {
-        --primary: #0d9488;
-        --primary-foreground: #ffffff;
-        --bg-page: #F9F7F2;
-        --bg-card: #ffffff;
-        --sidebar: #134e4a;
-        --border: #f1f5f9;
         --root-font-size: 14px;
+        /* Default theme = teal (set by JS on load) */
       }
 
-      html {
-        font-size: var(--root-font-size);
+      html { font-size: var(--root-font-size); }
+
+      body {
+        font-family: 'Manrope', sans-serif;
+        background-color: var(--bg-page);
+        color: #2a3433;
       }
 
-      .theme-slate { --primary: #0f172a; --sidebar: #0f172a; }
-      .theme-indigo { --primary: #4f46e5; --sidebar: #1e1b4b; }
-      .theme-teal { --primary: #0d9488; --sidebar: #134e4a; }
-      .theme-rose { --primary: #e11d48; --sidebar: #4c0519; }
-      .theme-amber { --primary: #d97706; --sidebar: #451a03; }
-      .theme-high-contrast { --primary: #000000; --sidebar: #000000; --bg-page: #ffffff; }
-
-      .dark {
-        --bg-page: #020617;
-        --bg-card: #0f172a;
-        --primary-foreground: #f8fafc;
-        --border: #1e293b;
-      }
-
-      .dark.theme-high-contrast {
-        --bg-page: #000000;
-        --bg-card: #111111;
-        --primary: #ffffff;
-        --primary-foreground: #000000;
-        --border: #334155;
-      }
-
-      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
       ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-      .dark ::-webkit-scrollbar-thumb { background: #334155; }
+      ::-webkit-scrollbar-thumb { background: #a9b4b1; border-radius: 4px; }
+      .dark ::-webkit-scrollbar-thumb { background: #2a3e3c; }
 
-      @keyframes orbit { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       @keyframes pulse-soft { 0%, 100% { transform: scale(1); opacity: 0.8; } 50% { transform: scale(1.1); opacity: 1; } }
       @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
     </style>
@@ -91,7 +115,7 @@
 }
 </script>
 </head>
-  <body class="bg-bg-page text-slate-900 dark:text-slate-100 font-sans antialiased transition-colors duration-300">
+  <body class="bg-bg-page text-on-background font-sans antialiased transition-colors duration-300">
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
   </body>

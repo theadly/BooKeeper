@@ -8,4 +8,18 @@ export default defineConfig({
     'process.env': process.env
   },
   envPrefix: ['VITE_'],
+  server: {
+    proxy: {
+      '/api/zoho-accounts': {
+        target: 'https://accounts.zoho.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/zoho-accounts/, ''),
+      },
+      '/api/zoho': {
+        target: 'https://www.zohoapis.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/zoho/, ''),
+      },
+    },
+  },
 });

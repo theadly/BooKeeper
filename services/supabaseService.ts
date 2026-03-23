@@ -219,15 +219,77 @@ export async function clearBankTransactions(): Promise<void> {
   if (error) throw error;
 }
 
-// ── App Settings ───────────────────────────────────────────────────────────
+// ── App Settings (Supabase with localStorage fallback) ────────────────────
 
 export async function loadSetting<T>(key: string, defaultVal: T): Promise<T> {
-  const { data, error } = await supabase.from('app_settings').select('value').eq('key', key).single();
-  if (error || !data) return defaultVal;
-  return data.value as T;
+  try {
+    const { data, error } = await supabase.from('app_settings').select('value').eq('key', key).single();
+    if (!error && data) return data.value as T;
+  } catch { /* fall through */ }
+  // Fallback to localStorage
+  try {
+    const stored = localStorage.getItem(`bk_${key}`);
+    if (stored) return JSON.parse(stored) as T;
+  } catch { /* ignore */ }
+  return defaultVal;
 }
 
 export async function saveSetting(key: string, value: any): Promise<void> {
+  try { localStorage.setItem(`bk_${key}`, JSON.stringify(value)); } catch { /* ignore */ }
   const { error } = await supabase.from('app_settings').upsert({ key, value, updated_at: new Date().toISOString() });
-  if (error) throw error;
+  if (error) console.warn('saveSetting Supabase error:', error.message);
+}
+
+// ── localStorage fallback helpers ─────────────────────────────────────────
+
+function lsSave(key: string, value: any) {
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+}
+
+function lsLoad<T>(key: string): T | null {
+  try {
+    const s = localStorage.getItem(key);
+    if (s) return JSON.parse(s) as T;
+  } catch { /* ignore */ }
+  return null;
+}
+
+// ── Transactions ──────────────────────────────────────────────────────────
+
+export async function saveTransactionsLocal(ts: Transaction[]): Promise<void> {
+  lsSave('bk_transactions', ts);
+}
+
+export async function loadTransactionsLocal(): Promise<Transaction[] | null> {
+  return lsLoad<Transaction[]>('bk_transactions');
+}
+
+// ── Contacts ──────────────────────────────────────────────────────────────
+
+export function saveContactsLocal(contacts: Contact[]): void {
+  lsSave('bk_contacts', contacts);
+}
+
+export function loadContactsLocal(): Contact[] | null {
+  return lsLoad<Contact[]>('bk_contacts');
+}
+
+// ── Campaigns ─────────────────────────────────────────────────────────────
+
+export function saveCampaignsLocal(campaigns: Record<string, Campaign>): void {
+  lsSave('bk_campaigns', campaigns);
+}
+
+export function loadCampaignsLocal(): Record<string, Campaign> | null {
+  return lsLoad<Record<string, Campaign>>('bk_campaigns');
+}
+
+// ── Bank Transactions ─────────────────────────────────────────────────────
+
+export function saveBankTransactionsLocal(bts: BankTransaction[]): void {
+  lsSave('bk_bank_transactions', bts);
+}
+
+export function loadBankTransactionsLocal(): BankTransaction[] | null {
+  return lsLoad<BankTransaction[]>('bk_bank_transactions');
 }
