@@ -24,22 +24,73 @@ export const MAPPABLE_FIELDS: { key: string; label: string; required?: boolean }
   { key: 'notes', label: 'Notes' },
 ];
 
-// Auto-detect patterns for each field
+// Auto-detect patterns — ordered from most to least specific
 const FIELD_PATTERNS: Record<string, RegExp> = {
-  date:          /^date$|invoice[\s_-]?date|created[\s_-]?(?:at|date)|issue[\s_-]?date/i,
-  invoiceNumber: /invoice[\s_-]?(?:num(?:ber)?|no|#)|inv[\s_-]?(?:no|num)|^inv#?$/i,
-  project:       /^project$|^description$|^service$|^work$|project[\s_-]name|campaign/i,
-  customerName:  /^customer$|client[\s_-]?name|company[\s_-]?name|^client$|^customer[\s_-]name$/i,
-  amount:        /^amount$|^total$|invoice[\s_-]?(?:total|amount)|^price$|^value$/i,
-  currency:      /^currency$|^curr$/i,
-  vat:           /^vat$|^tax$|vat[\s_-]?amount|tax[\s_-]?amount/i,
-  fee:           /^fee$|^commission$|adly[\s_-]?fee|agency[\s_-]?fee/i,
-  payable:       /^payable$|net[\s_-]?payable|to[\s_-]?transfer|laila[\s_-]?(?:amount|payable)/i,
-  clientStatus:  /client[\s_-]?status|payment[\s_-]?status|^status$|invoice[\s_-]?status/i,
-  ladlyStatus:   /ladly[\s_-]?status|laila[\s_-]?status|company[\s_-]?status|internal[\s_-]?status/i,
-  type:          /^type$|transaction[\s_-]?type|income[\s_-]?expense/i,
-  notes:         /^notes?$|^remarks?$|^comments?$|^memo$/i,
+  // Dates
+  date: /^(date|invoice[\s_-]?date|issue[\s_-]?date|created[\s_-]?(at|date)|تاريخ)$/i,
+
+  // Invoice number — very specific so it doesn't eat other fields
+  invoiceNumber: /^(invoice[\s_-]?(num(ber)?|no\.?|#)|inv[\s_-]?(no\.?|num|#)|#invoice|رقم\s*الفاتورة)$/i,
+
+  // Project / description
+  project: /^(project|description|service|work|campaign|task|job|project[\s_-]name|المشروع|الوصف)$/i,
+
+  // Customer
+  customerName: /^(customer(\s*name)?|client(\s*name)?|company(\s*name)?|brand|العميل|الشركة)$/i,
+
+  // Amount — must not match VAT/fee/payable columns
+  amount: /^(amount|total|invoice[\s_-]?(total|amount|value)|gross|price|المبلغ|الإجمالي)$/i,
+
+  // Currency
+  currency: /^(currency|curr(ency)?|العملة)$/i,
+
+  // VAT / tax
+  vat: /^(vat|tax|vat[\s_-]?amount|tax[\s_-]?amount|ضريبة|ضريبة القيمة المضافة)$/i,
+
+  // Fee
+  fee: /^(fee|commission|adly[\s_-]?fee|agency[\s_-]?fee|adly|العمولة|رسوم)$/i,
+
+  // Net payable to Laila
+  payable: /^(payable|net[\s_-]?payable|to[\s_-]?transfer|laila[\s_-]?(amount|payable|total)|net|صافي)$/i,
+
+  // Client payment status
+  clientStatus: /^(client[\s_-]?status|payment[\s_-]?status|invoice[\s_-]?status|حالة[\s_-]?(الدفع|الفاتورة))$/i,
+
+  // Internal / Ladly status
+  ladlyStatus: /^(ladly[\s_-]?status|laila[\s_-]?status|internal[\s_-]?status|company[\s_-]?status|الحالة[\s_-]?الداخلية)$/i,
+
+  // Income / Expense type
+  type: /^(type|transaction[\s_-]?type|income[\s_-]?expense|النوع)$/i,
+
+  // Notes
+  notes: /^(notes?|remarks?|comments?|memo|ملاحظات)$/i,
 };
+
+/** Normalise a string for comparison — lowercase, collapse whitespace, strip punctuation */
+function norm(s: string): string {
+  return (s ?? '').toLowerCase().trim().replace(/[\s_\-\.]+/g, ' ').replace(/[^\w\s\u0600-\u06FF]/g, '');
+}
+
+/** Compute a stable 32-bit integer hash of a string */
+function hashStr(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0; // unsigned
+}
+
+/**
+ * Generate a stable, deterministic ID for a sheet row.
+ * Same project + amount + date → always the same ID → re-syncing never duplicates.
+ */
+function stableSheetId(project: string, amount: number, date: string, invNum?: string): string {
+  const key = invNum
+    ? `inv:${invNum.trim().toLowerCase()}`
+    : `${date}|${norm(project)}|${Math.round(amount * 100)}`;
+  return `sheet_${hashStr(key).toString(36)}`;
+}
 
 /** Extract the spreadsheet ID from any Google Sheets URL */
 export function extractSheetId(url: string): string | null {
@@ -47,13 +98,11 @@ export function extractSheetId(url: string): string | null {
   return match ? match[1] : null;
 }
 
-/** Extract the GID (tab id) from a Google Sheets URL */
 function extractGid(url: string): string | null {
   const match = url.match(/[#&?]gid=(\d+)/);
   return match ? match[1] : null;
 }
 
-/** Build a CSV export URL */
 function buildCsvUrl(sheetId: string, gid?: string | null): string {
   let url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
   if (gid && gid !== '0') url += `&gid=${gid}`;
@@ -87,13 +136,48 @@ function parseCsv(csv: string): string[][] {
   return rows;
 }
 
-/** Auto-detect column mappings from header row */
+/**
+ * Auto-detect column mappings from header row.
+ * Uses strict regex patterns and falls back to partial matching.
+ */
 export function autoDetectMapping(headers: string[]): Record<string, string> {
   const mapping: Record<string, string> = {};
+  const usedHeaders = new Set<string>();
+
+  // Pass 1: strict regex match
   for (const [field, pattern] of Object.entries(FIELD_PATTERNS)) {
-    const match = headers.find(h => pattern.test(h.trim()));
-    if (match) mapping[field] = match;
+    const match = headers.find(h => !usedHeaders.has(h) && pattern.test(h.trim()));
+    if (match) {
+      mapping[field] = match;
+      usedHeaders.add(match);
+    }
   }
+
+  // Pass 2: partial / fuzzy fallback for unmapped fields
+  const fallbacks: Record<string, (h: string) => boolean> = {
+    date:          h => /date/i.test(h),
+    invoiceNumber: h => /inv/i.test(h) && /num|no|#/i.test(h),
+    project:       h => /project|desc|service|campaign/i.test(h),
+    customerName:  h => /client|customer|brand|company/i.test(h),
+    amount:        h => /amount|total|price|value/i.test(h) && !/vat|tax|fee|payable|net/i.test(h),
+    currency:      h => /curr/i.test(h),
+    vat:           h => /vat|tax/i.test(h),
+    fee:           h => /fee|commission|adly/i.test(h),
+    payable:       h => /payable|net|laila/i.test(h),
+    clientStatus:  h => /status/i.test(h) && !/ladly|laila|internal/i.test(h),
+    ladlyStatus:   h => /ladly|laila|internal/i.test(h),
+    notes:         h => /note|remark|comment|memo/i.test(h),
+  };
+
+  for (const [field, test] of Object.entries(fallbacks)) {
+    if (mapping[field]) continue; // already mapped
+    const match = headers.find(h => !usedHeaders.has(h) && test(h.trim()));
+    if (match) {
+      mapping[field] = match;
+      usedHeaders.add(match);
+    }
+  }
+
   return mapping;
 }
 
@@ -125,35 +209,55 @@ export async function fetchSheetHeaders(url: string): Promise<{ headers: string[
 function parseStatus(raw: string): StatusOption {
   const s = raw.trim().toLowerCase();
   if (s.includes('paid to personal') || s.includes('personal')) return 'Paid to personal account';
-  if (s === 'paid') return 'Paid';
-  if (s === 'pending') return 'Pending';
-  if (s === 'unpaid') return 'Unpaid';
-  if (s === 'overdue') return 'Overdue';
-  if (s === 'void') return 'Void';
-  if (s === 'draft') return 'Draft';
-  return 'Unpaid'; // fallback
+  if (s === 'paid' || s === 'مدفوع') return 'Paid';
+  if (s === 'pending' || s === 'معلق') return 'Pending';
+  if (s === 'unpaid' || s === 'غير مدفوع') return 'Unpaid';
+  if (s === 'overdue' || s === 'متأخر') return 'Overdue';
+  if (s === 'void' || s === 'ملغي') return 'Void';
+  if (s === 'draft' || s === 'مسودة') return 'Draft';
+  return 'Unpaid';
 }
 
-/** Parse a numeric value from a cell (strips currency symbols, commas etc.) */
 function parseNum(raw: string): number {
   return parseFloat(raw.replace(/[^0-9.-]/g, '')) || 0;
 }
 
-/** Parse a date cell into YYYY-MM-DD */
+/** Parse a date cell into YYYY-MM-DD, handling many common formats */
 function parseDate(raw: string): string {
   if (!raw) return new Date().toISOString().split('T')[0];
-  // Already YYYY-MM-DD
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
-  // DD/MM/YYYY or DD-MM-YYYY
-  const dmy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  const s = raw.trim();
+
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  // DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY
+  const dmy = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
   if (dmy) {
     const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
     return `${year}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`;
   }
-  // Try native Date parsing
-  const d = new Date(raw);
+
+  // MM/DD/YYYY (US format — only if month <= 12 and day > 12 is ambiguous so treat as DD/MM)
+  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) {
+    const m = parseInt(mdy[1]), d = parseInt(mdy[2]), y = mdy[3];
+    if (m <= 12 && d <= 31) return `${y}-${mdy[1].padStart(2, '0')}-${mdy[2].padStart(2, '0')}`;
+  }
+
+  // "Jan 2025", "January 2025", "Jan-25"
+  const mon = s.match(/^([A-Za-z]+)[\s\-](\d{2,4})$/);
+  if (mon) {
+    const months: Record<string, string> = { jan:'01',feb:'02',mar:'03',apr:'04',may:'05',jun:'06',jul:'07',aug:'08',sep:'09',oct:'10',nov:'11',dec:'12' };
+    const mKey = mon[1].toLowerCase().slice(0, 3);
+    const year = mon[2].length === 2 ? `20${mon[2]}` : mon[2];
+    if (months[mKey]) return `${year}-${months[mKey]}-01`;
+  }
+
+  // Native Date parsing fallback
+  const d = new Date(s);
   if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-  return raw;
+
+  return s;
 }
 
 export interface SheetSyncResult {
@@ -165,12 +269,6 @@ export interface SheetSyncResult {
   transactions: Transaction[];
 }
 
-/**
- * Fetch the sheet, map rows to Transactions, then merge with existing transactions.
- * - Matches by invoiceNumber first, then by date+project
- * - Updates status / amount on existing rows
- * - Appends new rows
- */
 export async function syncSheetToTransactions(
   config: GoogleSheetsConfig,
   existing: Transaction[]
@@ -187,7 +285,9 @@ export async function syncSheetToTransactions(
   try {
     const res = await fetch(csvUrl);
     if (!res.ok) {
-      const msg = res.status === 403 ? 'Sheet is private — set sharing to "Anyone with the link can view"' : `HTTP ${res.status}`;
+      const msg = res.status === 403
+        ? 'Sheet is private — set sharing to "Anyone with the link can view"'
+        : `HTTP ${res.status}`;
       return { added: 0, updated: 0, skipped: 0, total: 0, error: msg, transactions: existing };
     }
     rows = parseCsv(await res.text());
@@ -200,11 +300,9 @@ export async function syncSheetToTransactions(
   const headers = rows[0];
   const dataRows = rows.slice(1);
 
-  // Build header → column index lookup
   const colIdx: Record<string, number> = {};
   headers.forEach((h, i) => { colIdx[h] = i; });
 
-  // Helper: get cell value by mapped field
   const getCell = (row: string[], field: string): string => {
     const colName = columnMapping[field];
     if (!colName) return '';
@@ -216,50 +314,64 @@ export async function syncSheetToTransactions(
   const updatedExisting = [...existing];
 
   for (const row of dataRows) {
-    // Skip completely empty rows
     if (row.every(c => !c.trim())) { skipped++; continue; }
 
-    const rawAmount = getCell(row, 'amount');
-    const rawDate   = getCell(row, 'date');
+    const rawAmount  = getCell(row, 'amount');
+    const rawDate    = getCell(row, 'date');
     const rawProject = getCell(row, 'project') || getCell(row, 'customerName');
-
     if (!rawAmount && !rawProject) { skipped++; continue; }
 
-    const invNum   = getCell(row, 'invoiceNumber');
-    const customer = getCell(row, 'customerName');
-    const project  = getCell(row, 'project') || customer;
-    const dateStr  = parseDate(rawDate);
-    const year     = new Date(dateStr).getFullYear() || new Date().getFullYear();
-    const amount   = parseNum(rawAmount);
-    const rawCurr  = getCell(row, 'currency').toUpperCase();
-    const currency = rawCurr === 'USD' ? 'USD' : 'AED';
-    const vat      = parseNum(getCell(row, 'vat'));
-    const fee      = parseNum(getCell(row, 'fee'));
-    const payable  = parseNum(getCell(row, 'payable'));
-    const rawCS    = getCell(row, 'clientStatus');
+    const invNum      = getCell(row, 'invoiceNumber');
+    const customer    = getCell(row, 'customerName');
+    const project     = getCell(row, 'project') || customer;
+    const dateStr     = parseDate(rawDate);
+    const year        = new Date(dateStr).getFullYear() || new Date().getFullYear();
+    const amount      = parseNum(rawAmount);
+    const rawCurr     = getCell(row, 'currency').toUpperCase();
+    const currency    = rawCurr === 'USD' ? 'USD' : 'AED';
+    const vat         = parseNum(getCell(row, 'vat'));
+    const fee         = parseNum(getCell(row, 'fee'));
+    const payable     = parseNum(getCell(row, 'payable'));
+    const rawCS       = getCell(row, 'clientStatus');
     const clientStatus: StatusOption = rawCS ? parseStatus(rawCS) : 'Unpaid';
-    const rawLS    = getCell(row, 'ladlyStatus');
+    const rawLS       = getCell(row, 'ladlyStatus');
     const ladlyStatus: StatusOption = rawLS ? parseStatus(rawLS) : 'Unpaid';
-    const rawType  = getCell(row, 'type').toLowerCase();
-    const type     = rawType.includes('expense') ? TransactionType.EXPENSE : TransactionType.INCOME;
-    const notes    = getCell(row, 'notes');
+    const rawType     = getCell(row, 'type').toLowerCase();
+    const type        = rawType.includes('expense') ? TransactionType.EXPENSE : TransactionType.INCOME;
+    const notes       = getCell(row, 'notes');
 
-    // Multi-tier duplicate detection:
-    // 1. Invoice number (most reliable)
-    // 2. Date + project name (case-insensitive, trimmed)
-    // 3. Date + amount (catches same-day same-amount entries with different project names)
-    let matchIdx = -1;
-    if (invNum) {
+    // Compute the stable ID this row would have if previously synced
+    const stableId = stableSheetId(project, amount, dateStr, invNum || undefined);
+    const normProject = norm(project);
+
+    // ── 5-tier duplicate detection ──────────────────────────────────────────
+    // 1. Stable deterministic ID (catches re-syncs of same row)
+    let matchIdx = updatedExisting.findIndex(t => t.id === stableId);
+
+    // 2. Invoice number exact match
+    if (matchIdx === -1 && invNum) {
       matchIdx = updatedExisting.findIndex(t =>
-        t.invoiceNumber && t.invoiceNumber.trim() === invNum.trim()
+        t.invoiceNumber && norm(t.invoiceNumber) === norm(invNum)
       );
     }
-    if (matchIdx === -1 && project && dateStr) {
+
+    // 3. Normalised project name + date
+    if (matchIdx === -1 && normProject && dateStr) {
       matchIdx = updatedExisting.findIndex(t =>
-        t.date === dateStr &&
-        t.project?.toLowerCase().trim() === project.toLowerCase().trim()
+        t.date === dateStr && norm(t.project || '') === normProject
       );
     }
+
+    // 4. Normalised project name + amount (catches date format differences)
+    if (matchIdx === -1 && normProject && amount > 0) {
+      matchIdx = updatedExisting.findIndex(t =>
+        norm(t.project || '') === normProject &&
+        Math.abs((t.amount || 0) - amount) < 0.01 &&
+        t.type === type
+      );
+    }
+
+    // 5. Date + amount + type (last resort)
     if (matchIdx === -1 && dateStr && amount > 0) {
       matchIdx = updatedExisting.findIndex(t =>
         t.date === dateStr &&
@@ -269,29 +381,28 @@ export async function syncSheetToTransactions(
     }
 
     if (matchIdx !== -1) {
-      // Update existing — overwrite key fields from the sheet
       updatedExisting[matchIdx] = {
         ...updatedExisting[matchIdx],
+        id: stableId, // upgrade to stable ID if it was random before
         date: dateStr,
         year,
         project: project || updatedExisting[matchIdx].project,
         customerName: customer || updatedExisting[matchIdx].customerName,
         amount,
         currency,
-        ...(vat ? { vat } : {}),
-        ...(fee ? { fee } : {}),
+        ...(vat   ? { vat }     : {}),
+        ...(fee   ? { fee }     : {}),
         ...(payable ? { payable } : {}),
         clientStatus,
         ladlyStatus,
         type,
-        ...(notes ? { notes } : {}),
+        ...(notes  ? { notes }  : {}),
         ...(invNum ? { invoiceNumber: invNum } : {}),
       };
       updated++;
     } else {
-      // Add new transaction
-      const newTx: Transaction = {
-        id: `sheet_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      updatedExisting.push({
+        id: stableId,
         date: dateStr,
         year,
         project: project || 'Untitled',
@@ -299,49 +410,58 @@ export async function syncSheetToTransactions(
         customerName: customer,
         amount,
         currency,
-        vat: vat || undefined,
-        fee: fee || undefined,
+        vat:     vat     || undefined,
+        fee:     fee     || undefined,
         payable: payable || undefined,
         clientStatus,
         ladlyStatus,
         type,
         category: type === TransactionType.INCOME ? Category.FREELANCE : Category.OTHER,
         invoiceNumber: invNum || undefined,
-        notes: notes || undefined,
-      };
-      updatedExisting.push(newTx);
+        notes:   notes   || undefined,
+      });
       added++;
     }
   }
 
-  return {
-    added,
-    updated,
-    skipped,
-    total: dataRows.length,
-    transactions: updatedExisting,
-  };
+  return { added, updated, skipped, total: dataRows.length, transactions: updatedExisting };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Deduplication
+// ────────────────────────────────────────────────────────────────────────────
+
+function txScore(t: Transaction): number {
+  return [
+    t.invoiceNumber, t.zohoInvoiceId, t.customerName,
+    t.vat, t.fee, t.payable, t.notes, t.referenceNumber, t.codeToLm,
+  ].filter(Boolean).length;
 }
 
 /**
- * Build a stable fingerprint for a transaction used for duplicate detection.
- * Priority: invoiceNumber → zohoId → date+amount+type → date+project+type
+ * Build a dedup fingerprint.
+ * Priority: invoiceNumber → zohoId → stable sheet ID → project+amount+type → date+amount+type
+ *
+ * Identical project names with the same amount & type are always treated as duplicates.
  */
 function txFingerprint(t: Transaction): string {
-  if (t.invoiceNumber?.trim()) return `inv:${t.invoiceNumber.trim().toLowerCase()}`;
-  if (t.zohoInvoiceId?.trim()) return `zoho:${t.zohoInvoiceId.trim()}`;
-  const amt = Math.round((t.amount || 0) * 100); // cents, avoids float drift
-  if (amt > 0) return `amt:${t.date}_${amt}_${t.type}`;
-  const proj = (t.project || '').toLowerCase().trim().replace(/\s+/g, ' ');
-  return `proj:${t.date}_${proj}_${t.type}`;
-}
+  if (t.invoiceNumber?.trim())
+    return `inv:${norm(t.invoiceNumber)}`;
+  if (t.zohoInvoiceId?.trim())
+    return `zoho:${t.zohoInvoiceId.trim()}`;
+  if (t.id?.startsWith('sheet_'))
+    return `id:${t.id}`;
 
-/** Score a transaction by how much data it has — used to pick the best duplicate to keep */
-function txScore(t: Transaction): number {
-  return [
-    t.invoiceNumber, t.zohoInvoiceId, t.customerName, t.vat,
-    t.fee, t.payable, t.notes, t.referenceNumber, t.codeToLm,
-  ].filter(Boolean).length;
+  const normProj = norm(t.project || '');
+  const amt = Math.round((t.amount || 0) * 100);
+
+  // If project name is non-empty, use project + amount + type as the key
+  // This ensures identical project names with same amount are always merged
+  if (normProj)
+    return `proj:${normProj}|${amt}|${t.type}`;
+
+  // Fallback: date + amount + type
+  return `amt:${t.date}|${amt}|${t.type}`;
 }
 
 export interface DeduplicateResult {
@@ -350,38 +470,31 @@ export interface DeduplicateResult {
   duplicateGroups: Array<{ keep: Transaction; discard: Transaction[] }>;
 }
 
-/**
- * Find and remove duplicate transactions from a list.
- * Keeps the entry with the most filled-in fields (highest score).
- * Returns the clean list and a summary of what was removed.
- */
 export function deduplicateTransactions(transactions: Transaction[]): DeduplicateResult {
-  const seen = new Map<string, Transaction>(); // fingerprint → best tx to keep
-  const dupeGroups = new Map<string, Transaction[]>(); // fingerprint → discarded
+  const seen   = new Map<string, Transaction>();
+  const groups = new Map<string, Transaction[]>();
 
   for (const t of transactions) {
     const fp = txFingerprint(t);
     const existing = seen.get(fp);
     if (!existing) {
       seen.set(fp, t);
-      dupeGroups.set(fp, []);
+      groups.set(fp, []);
     } else {
-      // Keep whichever has more data
       if (txScore(t) > txScore(existing)) {
-        dupeGroups.get(fp)!.push(existing);
+        groups.get(fp)!.push(existing);
         seen.set(fp, t);
       } else {
-        dupeGroups.get(fp)!.push(t);
+        groups.get(fp)!.push(t);
       }
     }
   }
 
   const kept = Array.from(seen.values());
   const removed = transactions.length - kept.length;
-
   const duplicateGroups = Array.from(seen.entries())
-    .filter(([fp]) => (dupeGroups.get(fp)?.length ?? 0) > 0)
-    .map(([fp, keep]) => ({ keep, discard: dupeGroups.get(fp)! }));
+    .filter(([fp]) => (groups.get(fp)?.length ?? 0) > 0)
+    .map(([, keep]) => ({ keep, discard: groups.get(txFingerprint(keep))! }));
 
   return { kept, removed, duplicateGroups };
 }
