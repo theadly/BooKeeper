@@ -27,7 +27,7 @@ import {
   loadContacts, upsertContact, deleteContact,
   loadCampaigns, upsertCampaign, deleteCampaign,
   loadBankTransactions, upsertBankTransaction, upsertBankTransactions, clearBankTransactions,
-  loadSetting, saveSetting,
+  loadSetting, saveSetting, patchSetting,
   saveTransactionsLocal, loadTransactionsLocal,
   saveContactsLocal, loadContactsLocal,
   saveCampaignsLocal, loadCampaignsLocal,
@@ -197,9 +197,9 @@ const App: React.FC = () => {
       const { kept } = deduplicateTransactions(result.transactions);
       setTransactions(kept);
       upsertTransactions(kept).catch(console.error);
-      const nextConfig = { ...googleSheetsConfig, lastSync: new Date().toISOString() };
-      setGoogleSheetsConfig(nextConfig);
-      saveSetting('googleSheetsConfig', nextConfig).catch(console.error);
+      const lastSync = new Date().toISOString();
+      setGoogleSheetsConfig(prev => ({ ...prev, lastSync }));
+      patchSetting('googleSheetsConfig', { lastSync }).catch(console.error);
     }).catch(e => setSheetSyncError(e.message))
       .finally(() => setIsSyncingSheets(false));
   }, [googleSheetsConfig.sheetUrl, googleSheetsConfig.autoSync]);
@@ -214,9 +214,9 @@ const App: React.FC = () => {
       const { kept, removed } = deduplicateTransactions(result.transactions);
       setTransactions(kept);
       upsertTransactions(kept).catch(console.error);
-      const nextConfig = { ...googleSheetsConfig, lastSync: new Date().toISOString() };
-      setGoogleSheetsConfig(nextConfig);
-      saveSetting('googleSheetsConfig', nextConfig).catch(console.error);
+      const lastSync = new Date().toISOString();
+      setGoogleSheetsConfig(prev => ({ ...prev, lastSync }));
+      patchSetting('googleSheetsConfig', { lastSync }).catch(console.error);
       return { added: result.added, updated: result.updated, skipped: result.skipped + removed };
     } catch (e: any) {
       setSheetSyncError(e.message);

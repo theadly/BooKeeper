@@ -240,6 +240,12 @@ export async function saveSetting(key: string, value: any): Promise<void> {
   if (error) console.warn('saveSetting Supabase error:', error.message);
 }
 
+/** Patch only specific keys inside a JSON setting — fetches current DB value and merges, never clobbers other keys */
+export async function patchSetting(key: string, patch: Record<string, any>): Promise<void> {
+  const current = await loadSetting<Record<string, any>>(key, {});
+  await saveSetting(key, { ...current, ...patch });
+}
+
 // ── localStorage fallback helpers ─────────────────────────────────────────
 
 function lsSave(key: string, value: any) {
