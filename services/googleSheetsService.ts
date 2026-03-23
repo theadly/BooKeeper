@@ -244,14 +244,27 @@ export async function syncSheetToTransactions(
     const type     = rawType.includes('expense') ? TransactionType.EXPENSE : TransactionType.INCOME;
     const notes    = getCell(row, 'notes');
 
-    // Try to find existing transaction
+    // Multi-tier duplicate detection:
+    // 1. Invoice number (most reliable)
+    // 2. Date + project name (case-insensitive, trimmed)
+    // 3. Date + amount (catches same-day same-amount entries with different project names)
     let matchIdx = -1;
     if (invNum) {
-      matchIdx = updatedExisting.findIndex(t => t.invoiceNumber === invNum);
+      matchIdx = updatedExisting.findIndex(t =>
+        t.invoiceNumber && t.invoiceNumber.trim() === invNum.trim()
+      );
     }
     if (matchIdx === -1 && project && dateStr) {
-      matchIdx = updatedExisting.findIndex(
-        t => t.date === dateStr && t.project?.toLowerCase() === project.toLowerCase()
+      matchIdx = updatedExisting.findIndex(t =>
+        t.date === dateStr &&
+        t.project?.toLowerCase().trim() === project.toLowerCase().trim()
+      );
+    }
+    if (matchIdx === -1 && dateStr && amount > 0) {
+      matchIdx = updatedExisting.findIndex(t =>
+        t.date === dateStr &&
+        Math.abs((t.amount || 0) - amount) < 0.01 &&
+        t.type === type
       );
     }
 
@@ -308,4 +321,67 @@ export async function syncSheetToTransactions(
     total: dataRows.length,
     transactions: updatedExisting,
   };
+}
+
+/**
+ * Build a stable fingerprint for a transaction used for duplicate detection.
+ * Priority: invoiceNumber → zohoId → date+amount+type → date+project+type
+ */
+function txFingerprint(t: Transaction): string {
+  if (t.invoiceNumber?.trim()) return `inv:${t.invoiceNumber.trim().toLowerCase()}`;
+  if (t.zohoInvoiceId?.trim()) return `zoho:${t.zohoInvoiceId.trim()}`;
+  const amt = Math.round((t.amount || 0) * 100); // cents, avoids float drift
+  if (amt > 0) return `amt:${t.date}_${amt}_${t.type}`;
+  const proj = (t.project || '').toLowerCase().trim().replace(/\s+/g, ' ');
+  return `proj:${t.date}_${proj}_${t.type}`;
+}
+
+/** Score a transaction by how much data it has — used to pick the best duplicate to keep */
+function txScore(t: Transaction): number {
+  return [
+    t.invoiceNumber, t.zohoInvoiceId, t.customerName, t.vat,
+    t.fee, t.payable, t.notes, t.referenceNumber, t.codeToLm,
+  ].filter(Boolean).length;
+}
+
+export interface DeduplicateResult {
+  kept: Transaction[];
+  removed: number;
+  duplicateGroups: Array<{ keep: Transaction; discard: Transaction[] }>;
+}
+
+/**
+ * Find and remove duplicate transactions from a list.
+ * Keeps the entry with the most filled-in fields (highest score).
+ * Returns the clean list and a summary of what was removed.
+ */
+export function deduplicateTransactions(transactions: Transaction[]): DeduplicateResult {
+  const seen = new Map<string, Transaction>(); // fingerprint → best tx to keep
+  const dupeGroups = new Map<string, Transaction[]>(); // fingerprint → discarded
+
+  for (const t of transactions) {
+    const fp = txFingerprint(t);
+    const existing = seen.get(fp);
+    if (!existing) {
+      seen.set(fp, t);
+      dupeGroups.set(fp, []);
+    } else {
+      // Keep whichever has more data
+      if (txScore(t) > txScore(existing)) {
+        dupeGroups.get(fp)!.push(existing);
+        seen.set(fp, t);
+      } else {
+        dupeGroups.get(fp)!.push(t);
+      }
+    }
+  }
+
+  const kept = Array.from(seen.values());
+  const removed = transactions.length - kept.length;
+
+  const duplicateGroups = Array.from(seen.entries())
+    .filter(([fp]) => (dupeGroups.get(fp)?.length ?? 0) > 0)
+    .map(([fp, keep]) => ({ keep, discard: dupeGroups.get(fp)! }));
+
+  return { kept, removed, duplicateGroups };
 }

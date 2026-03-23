@@ -18,6 +18,7 @@ interface SettingsProps {
   onClearData: () => void;
   onExport: () => void;
   onImport: (file: File) => void;
+  onDeduplicate: () => Promise<number>;
   theme: string;
   onSetTheme: (theme: string) => void;
   isDarkMode: boolean;
@@ -36,7 +37,7 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({
-  isOpen, onClose, config, onSaveConfig, onSync, onClearData, onExport, onImport,
+  isOpen, onClose, config, onSaveConfig, onSync, onClearData, onExport, onImport, onDeduplicate,
   theme, onSetTheme, isDarkMode, onSetDarkMode, fontSize, onSetFontSize,
   showAedEquivalent, onSetShowAedEquivalent, isSyncing, syncError, user, onSignOut,
   googleSheetsConfig, onSaveGoogleSheetsConfig, onSyncSheets, isSyncingSheets, sheetSyncError
@@ -62,6 +63,8 @@ const Settings: React.FC<SettingsProps> = ({
   const [showWipeConfirmation, setShowWipeConfirmation] = useState(false);
   const [wipeDoubleCheck, setWipeDoubleCheck] = useState('');
   const [showZohoAdvanced, setShowZohoAdvanced] = useState(false);
+  const [dedupeStatus, setDedupeStatus] = useState<'idle' | 'running' | 'done'>('idle');
+  const [dedupeCount, setDedupeCount] = useState(0);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -495,6 +498,24 @@ const Settings: React.FC<SettingsProps> = ({
                     <button onClick={() => importInputRef.current?.click()} className="flex items-center justify-center gap-2 px-4 py-3 bg-surface-container-lowest border border-surface-container rounded-xl text-[9px] font-medium uppercase tracking-wider hover:bg-surface-container transition-colors"><UploadCloud size={13}/> Restore</button>
                     <input type="file" ref={importInputRef} className="hidden" accept=".json" onChange={(e) => e.target.files?.[0] && onImport(e.target.files[0])} />
                   </div>
+
+                  {/* Deduplicate */}
+                  <button
+                    onClick={async () => {
+                      setDedupeStatus('running');
+                      setDedupeCount(0);
+                      const removed = await onDeduplicate();
+                      setDedupeCount(removed);
+                      setDedupeStatus('done');
+                      setTimeout(() => setDedupeStatus('idle'), 4000);
+                    }}
+                    disabled={dedupeStatus === 'running'}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-surface-container-lowest border border-surface-container rounded-xl text-[9px] font-medium uppercase tracking-wider hover:bg-surface-container transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw size={13} className={dedupeStatus === 'running' ? 'animate-spin' : ''} />
+                    {dedupeStatus === 'running' ? 'Scanning...' : dedupeStatus === 'done' ? (dedupeCount > 0 ? `Removed ${dedupeCount} duplicate${dedupeCount !== 1 ? 's' : ''}` : 'No duplicates found') : 'Find & Remove Duplicates'}
+                  </button>
+
                   <button onClick={() => { setWipeDoubleCheck(''); setShowWipeConfirmation(true); }} className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-error/5 text-error hover:bg-error/10 rounded-xl text-[9px] font-medium uppercase tracking-wider transition-colors border border-error/20"><Trash2 size={13}/> Factory Reset</button>
                 </div>
               </div>

@@ -18,7 +18,7 @@ import {
 import { RATE_CARD_SERVICES } from './constants';
 import { parseBankStatement } from './services/geminiService';
 import { fetchZohoInvoices, mergeZohoInvoice, refreshZohoToken } from './services/zohoService';
-import { syncSheetToTransactions } from './services/googleSheetsService';
+import { syncSheetToTransactions, deduplicateTransactions } from './services/googleSheetsService';
 import {
   supabase,
   signInWithGoogle, signOut as supabaseSignOut,
@@ -830,6 +830,18 @@ const App: React.FC = () => {
         onSyncSheets={handleSyncSheets}
         isSyncingSheets={isSyncingSheets}
         sheetSyncError={sheetSyncError}
+        onDeduplicate={async () => {
+          const { kept, removed } = deduplicateTransactions(transactions);
+          if (removed > 0) {
+            setTransactions(kept);
+            upsertTransactions(kept).catch(console.error);
+            // Remove the discarded ones from Supabase
+            const keptIds = new Set(kept.map(t => t.id));
+            const removedIds = transactions.filter(t => !keptIds.has(t.id)).map(t => t.id);
+            deleteTransactions(removedIds).catch(console.error);
+          }
+          return removed;
+        }}
       />
 
       <AIChat 
