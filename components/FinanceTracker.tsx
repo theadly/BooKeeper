@@ -538,7 +538,7 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
                   <ResizableTh colKey="inv" label="Inv #" />
                   <ResizableTh colKey="cStatus" align="center" label="Client Status" />
                   <ResizableTh colKey="lStatus" align="center" label="Ladly Status" />
-                  <ResizableTh colKey="amount" align="right" label="Gross" />
+                  <ResizableTh colKey="amount" align="right" label="Invoice Amount" />
                   <ResizableTh colKey="vat" align="right" label="VAT" />
                   <ResizableTh colKey="net" align="right" label="Net" />
                   <ResizableTh colKey="fee" align="right" label="Fee" />
@@ -641,7 +641,7 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
               <div className="pt-4 border-t border-surface-container space-y-3">
                 <p className="text-[10px] font-medium text-on-surface-variant uppercase tracking-widest">Financials</p>
                 {[
-                  { l: 'Gross', v: formatCurrency(selectedTransaction.amount, selectedTransaction.currency), c: 'font-serif text-lg text-on-background' },
+                  { l: 'Invoice Amount', v: formatCurrency(selectedTransaction.amount, selectedTransaction.currency), c: 'font-serif text-lg text-on-background' },
                   { l: 'VAT (5%)', v: formatCurrency(selectedTransaction.vat || 0, selectedTransaction.currency), c: 'text-on-surface-variant' },
                   { l: 'Fee (15%)', v: formatCurrency(selectedTransaction.fee || 0, selectedTransaction.currency), c: 'text-error' },
                   { l: 'To Laila', v: formatCurrency(selectedTransaction.payable || 0, selectedTransaction.currency), c: 'font-serif text-xl text-primary' },
@@ -688,7 +688,7 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
                   { label: 'Project', field: 'project', type: 'text', placeholder: 'e.g. Dyson Squad 2026', required: true },
                   { label: 'Client', field: 'customerName', type: 'text', placeholder: 'e.g. Weber Shandwick' },
                   { label: 'Date', field: 'date', type: 'date', required: true },
-                  { label: 'Gross Amount (AED)', field: 'amount', type: 'number', placeholder: '0.00', required: true },
+                  { label: 'Invoice Amount (AED)', field: 'amount', type: 'number', placeholder: '0.00', required: true },
                   { label: 'Invoice #', field: 'invoiceNumber', type: 'text', placeholder: 'INV-2026-001' },
                 ].map(({ label, field, type, placeholder, required }) => (
                   <div key={field} className="space-y-1.5">

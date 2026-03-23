@@ -159,12 +159,18 @@ const App: React.FC = () => {
           setTransactions(prev => {
             const combined = [...prev];
             invoices.forEach(inv => {
-              const idx = combined.findIndex(t => t.id === inv.id);
+              // Match by zohoInvoiceId, invoiceNumber, or id
+              const idx = combined.findIndex(t =>
+                t.id === inv.id ||
+                (inv.zohoInvoiceId && t.zohoInvoiceId === inv.zohoInvoiceId) ||
+                (inv.invoiceNumber && t.invoiceNumber && t.invoiceNumber === inv.invoiceNumber)
+              );
               if (idx >= 0) combined[idx] = mergeZohoInvoice(inv, combined[idx]);
               else combined.push(inv);
             });
-            saveTransactionsLocal(combined).catch(console.error);
-            return combined;
+            const { kept } = deduplicateTransactions(combined);
+            saveTransactionsLocal(kept).catch(console.error);
+            return kept;
           });
           upsertTransactions(invoices).catch(console.error);
           const nextConfig = { ...config, lastSync: new Date().toLocaleString() };
@@ -187,8 +193,9 @@ const App: React.FC = () => {
     setSheetSyncError(null);
     syncSheetToTransactions(googleSheetsConfig, transactions).then(result => {
       if (result.error) { setSheetSyncError(result.error); return; }
-      setTransactions(result.transactions);
-      upsertTransactions(result.transactions).catch(console.error);
+      const { kept } = deduplicateTransactions(result.transactions);
+      setTransactions(kept);
+      upsertTransactions(kept).catch(console.error);
       const nextConfig = { ...googleSheetsConfig, lastSync: new Date().toISOString() };
       setGoogleSheetsConfig(nextConfig);
       saveSetting('googleSheetsConfig', nextConfig).catch(console.error);
@@ -203,12 +210,13 @@ const App: React.FC = () => {
     try {
       const result = await syncSheetToTransactions(googleSheetsConfig, transactions);
       if (result.error) { setSheetSyncError(result.error); return; }
-      setTransactions(result.transactions);
-      upsertTransactions(result.transactions).catch(console.error);
+      const { kept, removed } = deduplicateTransactions(result.transactions);
+      setTransactions(kept);
+      upsertTransactions(kept).catch(console.error);
       const nextConfig = { ...googleSheetsConfig, lastSync: new Date().toISOString() };
       setGoogleSheetsConfig(nextConfig);
       saveSetting('googleSheetsConfig', nextConfig).catch(console.error);
-      return { added: result.added, updated: result.updated, skipped: result.skipped };
+      return { added: result.added, updated: result.updated, skipped: result.skipped + removed };
     } catch (e: any) {
       setSheetSyncError(e.message);
     } finally {
@@ -625,9 +633,18 @@ const App: React.FC = () => {
           const invoices = await fetchZohoInvoices(config);
           setTransactions(prev => {
             const combined = [...prev];
-            invoices.forEach(inv => { const idx = combined.findIndex(t => t.id === inv.id); if (idx >= 0) combined[idx] = mergeZohoInvoice(inv, combined[idx]); else combined.push(inv); });
-            saveTransactionsLocal(combined).catch(console.error);
-            return combined;
+            invoices.forEach(inv => {
+              const idx = combined.findIndex(t =>
+                t.id === inv.id ||
+                (inv.zohoInvoiceId && t.zohoInvoiceId === inv.zohoInvoiceId) ||
+                (inv.invoiceNumber && t.invoiceNumber && t.invoiceNumber === inv.invoiceNumber)
+              );
+              if (idx >= 0) combined[idx] = mergeZohoInvoice(inv, combined[idx]);
+              else combined.push(inv);
+            });
+            const { kept } = deduplicateTransactions(combined);
+            saveTransactionsLocal(kept).catch(console.error);
+            return kept;
           });
           upsertTransactions(invoices).catch(console.error);
           const nextConfig = { ...config, lastSync: new Date().toLocaleString() };

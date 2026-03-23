@@ -13,7 +13,7 @@ export const MAPPABLE_FIELDS: { key: string; label: string; required?: boolean }
   { key: 'invoiceNumber', label: 'Invoice Number' },
   { key: 'project', label: 'Project / Description', required: true },
   { key: 'customerName', label: 'Customer / Client Name' },
-  { key: 'amount', label: 'Amount', required: true },
+  { key: 'amount', label: 'Invoice Amount', required: true },
   { key: 'currency', label: 'Currency' },
   { key: 'vat', label: 'VAT' },
   { key: 'fee', label: 'Fee (Adly)' },
@@ -39,7 +39,7 @@ const FIELD_PATTERNS: Record<string, RegExp> = {
   customerName: /^(customer(\s*name)?|client(\s*name)?|company(\s*name)?|brand|العميل|الشركة)$/i,
 
   // Amount — must not match VAT/fee/payable columns
-  amount: /^(amount|total|invoice[\s_-]?(total|amount|value)|gross|price|المبلغ|الإجمالي)$/i,
+  amount: /^(amount|total|invoice[\s_-]?(total|amount|value)|gross[\s_-]?amount|gross|price|المبلغ|الإجمالي)$/i,
 
   // Currency
   currency: /^(currency|curr(ency)?|العملة)$/i,
@@ -159,7 +159,7 @@ export function autoDetectMapping(headers: string[]): Record<string, string> {
     invoiceNumber: h => /inv/i.test(h) && /num|no|#/i.test(h),
     project:       h => /project|desc|service|campaign/i.test(h),
     customerName:  h => /client|customer|brand|company/i.test(h),
-    amount:        h => /amount|total|price|value/i.test(h) && !/vat|tax|fee|payable|net/i.test(h),
+    amount:        h => /amount|total|price|value|gross/i.test(h) && !/vat|tax|fee|payable|net/i.test(h),
     currency:      h => /curr/i.test(h),
     vat:           h => /vat|tax/i.test(h),
     fee:           h => /fee|commission|adly/i.test(h),
@@ -383,20 +383,21 @@ export async function syncSheetToTransactions(
     if (matchIdx !== -1) {
       updatedExisting[matchIdx] = {
         ...updatedExisting[matchIdx],
-        id: stableId, // upgrade to stable ID if it was random before
+        // Keep original id — changing it would create a new DB record
         date: dateStr,
         year,
         project: project || updatedExisting[matchIdx].project,
         customerName: customer || updatedExisting[matchIdx].customerName,
         amount,
         currency,
-        ...(vat   ? { vat }     : {}),
-        ...(fee   ? { fee }     : {}),
-        ...(payable ? { payable } : {}),
+        ...(vat     > 0  ? { vat }     : {}),
+        ...(fee     > 0  ? { fee }     : {}),
+        ...(payable > 0  ? { payable } : {}),
         clientStatus,
         ladlyStatus,
         type,
         ...(notes  ? { notes }  : {}),
+        // Always write invoiceNumber from sheet if present (core fix)
         ...(invNum ? { invoiceNumber: invNum } : {}),
       };
       updated++;
