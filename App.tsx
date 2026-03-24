@@ -17,7 +17,7 @@ import {
 } from './types';
 import { RATE_CARD_SERVICES } from './constants';
 import { parseBankStatement } from './services/geminiService';
-import { fetchZohoInvoices, mergeZohoInvoice, refreshZohoToken, sendZohoInvoice, markZohoInvoicePaid, createZohoInvoice, getZohoInvoiceUrl } from './services/zohoService';
+import { fetchZohoInvoices, mergeZohoInvoice, refreshZohoToken, sendZohoInvoice, markZohoInvoicePaid, createZohoInvoice, getZohoInvoiceUrl, downloadZohoInvoicePDF, sendZohoPaymentReminder } from './services/zohoService';
 import { syncSheetToTransactions, deduplicateTransactions } from './services/googleSheetsService';
 import {
   supabase,
@@ -301,6 +301,16 @@ const App: React.FC = () => {
     if (!zohoConfig.accessToken) return;
     const { invoiceId, invoiceNumber } = await createZohoInvoice(zohoConfig, t);
     handleUpdateTransaction({ ...t, zohoInvoiceId: invoiceId, invoiceNumber: invoiceNumber || t.invoiceNumber });
+  };
+
+  const handleZohoDownloadPDF = async (t: Transaction) => {
+    if (!zohoConfig.accessToken || !t.zohoInvoiceId) return;
+    await downloadZohoInvoicePDF(zohoConfig, t.zohoInvoiceId, t.invoiceNumber || t.id);
+  };
+
+  const handleZohoSendReminder = async (t: Transaction) => {
+    if (!zohoConfig.accessToken || !t.zohoInvoiceId) return;
+    await sendZohoPaymentReminder(zohoConfig, t.zohoInvoiceId);
   };
 
   const handleAddContact = (c: Contact) => {
@@ -719,6 +729,8 @@ const App: React.FC = () => {
           onZohoSendInvoice={handleZohoSendInvoice}
           onZohoMarkPaid={handleZohoMarkPaid}
           onZohoCreateInvoice={handleZohoCreateInvoice}
+          onZohoDownloadPDF={handleZohoDownloadPDF}
+          onZohoSendReminder={handleZohoSendReminder}
         />
       )}
       {activeTab === 'banking' && (

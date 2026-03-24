@@ -4,7 +4,8 @@ import {
   Plus, Search, Trash2, FileSpreadsheet, Edit, X, CheckSquare,
   Square, ChevronUp, ChevronDown, Undo2, Redo2, ArrowRight,
   FileText, ShieldCheck, Package, Info, Sheet, RefreshCw, Link2,
-  CheckCircle, AlertTriangle, Copy, Zap, ExternalLink, Send, BadgeCheck, Columns
+  CheckCircle, AlertTriangle, Copy, Zap, ExternalLink, Send, BadgeCheck, Columns,
+  FileDown, Bell, ChevronDown as ChevronDownIcon
 } from 'lucide-react';
 import { CONFIG } from '../config';
 import { FINANCE_STATUS_OPTIONS, CATEGORY_OPTIONS, formatCurrency, formatDate } from '../constants';
@@ -42,6 +43,8 @@ interface FinanceTrackerProps {
   onZohoSendInvoice?: (t: Transaction) => Promise<void>;
   onZohoMarkPaid?: (t: Transaction) => Promise<void>;
   onZohoCreateInvoice?: (t: Transaction) => Promise<void>;
+  onZohoDownloadPDF?: (t: Transaction) => Promise<void>;
+  onZohoSendReminder?: (t: Transaction) => Promise<void>;
 }
 
 interface SortConfig { key: string; direction: 'asc' | 'desc' | null; }
@@ -52,7 +55,8 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
   onUndo, onRedo, canUndo, canRedo, isProcessing,
   columnWidths, onColumnWidthChange, columnLabels, showAedEquivalent, bankTransactions, onReconcile, onUnlink,
   googleSheetsConfig, onSaveGoogleSheetsConfig, onSyncSheets, isSyncingSheets, sheetSyncError, onDeduplicate,
-  zohoOrgId, zohoConnected, onZohoSendInvoice, onZohoMarkPaid, onZohoCreateInvoice
+  zohoOrgId, zohoConnected, onZohoSendInvoice, onZohoMarkPaid, onZohoCreateInvoice,
+  onZohoDownloadPDF, onZohoSendReminder
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [yearFilter, setYearFilter] = useState<string[]>([]);
@@ -64,6 +68,7 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
   const [selectedDetailId, setSelectedDetailId] = useState<string | null>(null);
   const [isYearDropdownOpen, setIsYearDropdownOpen] = useState(false);
   const yearDropdownRef = useRef<HTMLDivElement>(null);
+  const [zohoMenuOpenId, setZohoMenuOpenId] = useState<string | null>(null);
 
   // Google Sheets panel state
   const [isSheetPanelOpen, setIsSheetPanelOpen] = useState(false);
@@ -645,29 +650,54 @@ const FinanceTracker: React.FC<FinanceTrackerProps> = ({
                         <button onClick={(e) => handleDelete(t.id, e)} className="p-1.5 text-on-surface-variant hover:text-error hover:bg-error/10 rounded-lg transition-all" title="Delete"><Trash2 size={13}/></button>
                         <button onClick={(e) => { e.stopPropagation(); setSelectedDetailId(t.id); }} className={`p-1.5 rounded-lg transition-all ${(t.referenceNumber || t.paymentToLmRef) ? 'text-primary' : 'text-on-surface-variant hover:text-primary hover:bg-primary/10'}`} title="Details"><Info size={13}/></button>
                         {zohoConnected && (
-                          <>
-                            {t.zohoInvoiceId && (
-                              <>
-                                <button
-                                  onClick={async (e) => { e.stopPropagation(); try { await onZohoSendInvoice?.(t); } catch(err: any) { alert(err.message); } }}
-                                  className="p-1.5 text-on-surface-variant hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
-                                  title="Send invoice via Zoho"
-                                ><Send size={12}/></button>
-                                <button
-                                  onClick={async (e) => { e.stopPropagation(); try { await onZohoMarkPaid?.(t); } catch(err: any) { alert(err.message); } }}
-                                  className="p-1.5 text-on-surface-variant hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-all"
-                                  title="Mark as paid in Zoho"
-                                ><BadgeCheck size={12}/></button>
-                              </>
+                          <div className="relative" onClick={e => e.stopPropagation()}>
+                            <button
+                              onClick={() => setZohoMenuOpenId(prev => prev === t.id ? null : t.id)}
+                              className="p-1.5 text-on-surface-variant hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all flex items-center gap-0.5"
+                              title="Zoho actions"
+                            >
+                              <Zap size={12}/>
+                              <ChevronDownIcon size={9}/>
+                            </button>
+                            {zohoMenuOpenId === t.id && (
+                              <div className="absolute left-0 top-full mt-1 z-50 bg-surface-container border border-outline-variant rounded-xl shadow-lg min-w-[170px] py-1">
+                                {t.zohoInvoiceId && zohoOrgId && (
+                                  <a
+                                    href={`https://books.zoho.com/app/${zohoOrgId}#/invoices/${t.zohoInvoiceId}`}
+                                    target="_blank" rel="noopener noreferrer"
+                                    className="flex items-center gap-2 px-3 py-2 text-[12px] text-on-surface hover:bg-primary/10 transition-colors"
+                                    onClick={() => setZohoMenuOpenId(null)}
+                                  ><ExternalLink size={12} className="text-primary"/>Open in Zoho</a>
+                                )}
+                                {t.zohoInvoiceId && (
+                                  <>
+                                    <button
+                                      onClick={async () => { setZohoMenuOpenId(null); try { await onZohoSendInvoice?.(t); } catch(err: any) { alert(err.message); } }}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-on-surface hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                                    ><Send size={12}/>Send Invoice</button>
+                                    <button
+                                      onClick={async () => { setZohoMenuOpenId(null); try { await onZohoMarkPaid?.(t); } catch(err: any) { alert(err.message); } }}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-on-surface hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
+                                    ><BadgeCheck size={12}/>Mark as Paid</button>
+                                    <button
+                                      onClick={async () => { setZohoMenuOpenId(null); try { await onZohoDownloadPDF?.(t); } catch(err: any) { alert(err.message); } }}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-on-surface hover:bg-purple-50 hover:text-purple-700 transition-colors"
+                                    ><FileDown size={12}/>Download PDF</button>
+                                    <button
+                                      onClick={async () => { setZohoMenuOpenId(null); try { await onZohoSendReminder?.(t); } catch(err: any) { alert(err.message); } }}
+                                      className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-on-surface hover:bg-amber-50 hover:text-amber-700 transition-colors"
+                                    ><Bell size={12}/>Send Reminder</button>
+                                  </>
+                                )}
+                                {!t.zohoInvoiceId && t.type === TransactionType.INCOME && (
+                                  <button
+                                    onClick={async () => { setZohoMenuOpenId(null); try { await onZohoCreateInvoice?.(t); } catch(err: any) { alert(err.message); } }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-on-surface hover:bg-amber-50 hover:text-amber-700 transition-colors"
+                                  ><Zap size={12}/>Create in Zoho</button>
+                                )}
+                              </div>
                             )}
-                            {!t.zohoInvoiceId && t.type === TransactionType.INCOME && (
-                              <button
-                                onClick={async (e) => { e.stopPropagation(); try { await onZohoCreateInvoice?.(t); } catch(err: any) { alert(err.message); } }}
-                                className="p-1.5 text-on-surface-variant hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-all"
-                                title="Create invoice in Zoho"
-                              ><Zap size={12}/></button>
-                            )}
-                          </>
+                          </div>
                         )}
                       </div>
                     </td>

@@ -184,3 +184,31 @@ export const createZohoInvoice = async (config: ZohoConfig, t: Transaction): Pro
   if (!res.ok || data.code !== 0) throw new Error(data.message || res.statusText);
   return { invoiceId: data.invoice.invoice_id, invoiceNumber: data.invoice.invoice_number };
 };
+
+/** Download invoice as PDF and trigger browser save */
+export const downloadZohoInvoicePDF = async (config: ZohoConfig, invoiceId: string, invoiceNumber: string): Promise<void> => {
+  const res = await fetch(
+    `${getBaseUrl()}/books/v3/invoices/${invoiceId}?accept=pdf&organization_id=${config.organizationId}`,
+    { headers: { 'Authorization': `Zoho-oauthtoken ${config.accessToken}` } }
+  );
+  if (!res.ok) throw new Error(`PDF download failed (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${invoiceNumber || invoiceId}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
+/** Send a payment reminder email to the client via Zoho */
+export const sendZohoPaymentReminder = async (config: ZohoConfig, invoiceId: string): Promise<void> => {
+  const res = await fetch(
+    `${getBaseUrl()}/books/v3/invoices/${invoiceId}/paymentreminder?organization_id=${config.organizationId}`,
+    { method: 'POST', headers: { 'Authorization': `Zoho-oauthtoken ${config.accessToken}` } }
+  );
+  const data = await res.json();
+  if (!res.ok || data.code !== 0) throw new Error(data.message || res.statusText);
+};
